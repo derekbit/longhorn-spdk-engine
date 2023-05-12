@@ -12,3 +12,10 @@ const (
 	FrontendSPDKTCPNvmf     = "spdk-tcp-nvmf"
 	FrontendSPDKTCPBlockdev = "spdk-tcp-blockdev"
 )
+
+type InstanceType string
+
+const (
+	InstanceTypeReplica = InstanceType("replica")
+	InstanceTypeEngine  = InstanceType("engine")
+)
