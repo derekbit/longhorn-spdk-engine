@@ -8,6 +8,8 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
@@ -137,7 +139,12 @@ func (s *Server) ReplicaCreate(ctx context.Context, req *spdkrpc.ReplicaCreateRe
 		return nil, err
 	}
 
-	return r.Create(s.spdkClient, portStart, req.ExposeRequired)
+	ret, err = r.Create(s.spdkClient, portStart, req.ExposeRequired)
+	if err != nil {
+		return nil, err
+	}
+	s.updateChs[types.InstanceTypeReplica] <- interface{}(ret)
+	return ret, nil
 }
 
 func (s *Server) ReplicaDelete(ctx context.Context, req *spdkrpc.ReplicaDeleteRequest) (ret *empty.Empty, err error) {
@@ -231,7 +238,12 @@ func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequ
 		return nil, err
 	}
 
-	return SvcEngineCreate(s.spdkClient, req.Name, req.Frontend, req.ReplicaAddressMap, portStart)
+	ret, err = SvcEngineCreate(s.spdkClient, req.Name, req.Frontend, req.ReplicaAddressMap, portStart)
+	if err != nil {
+		return nil, err
+	}
+	s.updateChs[types.InstanceTypeEngine] <- interface{}(ret)
+	return ret, nil
 }
 
 func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequest) (ret *empty.Empty, err error) {
