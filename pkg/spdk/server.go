@@ -132,7 +132,7 @@ func (s *Server) ReplicaGet(ctx context.Context, req *spdkrpc.ReplicaGetRequest)
 	s.RUnlock()
 
 	if r == nil {
-		return nil, fmt.Errorf("replica %s is not found during get", req.Name)
+		return nil, grpcstatus.Error(grpccodes.NotFound, fmt.Sprintf("replica %s is not found during get", req.Name))
 	}
 
 	return r.Get()
