@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/ptypes/empty"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	grpccodes "google.golang.org/grpc/codes"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/longhorn/longhorn-spdk-engine/pkg/types"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/util"
+	"github.com/longhorn/longhorn-spdk-engine/pkg/util/broadcaster"
 	"github.com/longhorn/longhorn-spdk-engine/proto/spdkrpc"
 )
 
@@ -33,12 +35,26 @@ type Server struct {
 
 	replicaMap map[string]*Replica
 	engineMap  map[string]*Engine
+
+	broadcasters map[types.InstanceType]*broadcaster.Broadcaster
+	broadcastChs map[types.InstanceType]chan interface{}
+	updateChs    map[types.InstanceType]chan interface{}
 }
 
 func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 	cli, err := spdkclient.NewClient()
 	if err != nil {
 		return nil, err
+	}
+
+	broadcasters := map[types.InstanceType]*broadcaster.Broadcaster{}
+	broadcastChs := map[types.InstanceType]chan interface{}{}
+	updateChs := map[types.InstanceType]chan interface{}{}
+
+	for _, t := range []types.InstanceType{types.InstanceTypeReplica, types.InstanceTypeEngine} {
+		broadcasters[t] = &broadcaster.Broadcaster{}
+		broadcastChs[t] = make(chan interface{})
+		updateChs[t] = make(chan interface{})
 	}
 
 	s := &Server{
@@ -49,6 +65,19 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 
 		replicaMap: map[string]*Replica{},
 		engineMap:  map[string]*Engine{},
+
+		broadcasters: broadcasters,
+		broadcastChs: broadcastChs,
+		updateChs:    updateChs,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for _, t := range []types.InstanceType{types.InstanceTypeReplica, types.InstanceTypeEngine} {
+		if _, err := s.broadcasters[t].Subscribe(ctx, s.broadcastConnector, string(t)); err != nil {
+			return nil, err
+		}
 	}
 
 	// TODO: There is no need to maintain the replica map in cache when we can use one SPDK JSON API call to fetch the Lvol tree/chain info
@@ -71,6 +100,10 @@ func (s *Server) monitoring() {
 			if err := s.verify(); err != nil {
 				logrus.WithError(err).Errorf("SPDK Server: failed to verify and update replica cache, will retry later")
 			}
+		case r := <-s.updateChs[types.InstanceTypeReplica]:
+			s.broadcastChs[types.InstanceTypeReplica] <- interface{}(r)
+		case e := <-s.updateChs[types.InstanceTypeEngine]:
+			s.broadcastChs[types.InstanceTypeEngine] <- interface{}(e)
 		}
 		if done {
 			break
@@ -118,7 +151,7 @@ func (s *Server) verify() error {
 	return nil
 }
 
-func (s *Server) ReplicaCreate(ctx context.Context, req *spdkrpc.ReplicaCreateRequest) (ret *spdkrpc.Replica, err error) {
+func (s *Server) ReplicaCreate(ctx context.Context, req *spdkrpc.ReplicaCreateRequest) (r *spdkrpc.Replica, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
 	}
@@ -126,6 +159,19 @@ func (s *Server) ReplicaCreate(ctx context.Context, req *spdkrpc.ReplicaCreateRe
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "lvs name and lvs UUID are required")
 	}
 
+	r, err = s.createReplica(req)
+	if err != nil {
+		return nil, err
+	}
+
+	rCopy := &spdkrpc.Replica{}
+	*rCopy = *r
+
+	s.updateChs[types.InstanceTypeReplica] <- interface{}(rCopy)
+	return r, nil
+}
+
+func (s *Server) createReplica(req *spdkrpc.ReplicaCreateRequest) (ret *spdkrpc.Replica, err error) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -143,23 +189,35 @@ func (s *Server) ReplicaCreate(ctx context.Context, req *spdkrpc.ReplicaCreateRe
 }
 
 func (s *Server) ReplicaDelete(ctx context.Context, req *spdkrpc.ReplicaDeleteRequest) (ret *empty.Empty, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
+	}
+
+	r, err := s.deleteReplica(req)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, errors.Wrapf(err, "failed to delete replica %s", req.Name).Error())
+	}
+	if r != nil {
+		s.updateChs[types.InstanceTypeReplica] <- interface{}(r)
+	}
+
+	return &empty.Empty{}, err
+}
+
+func (s *Server) deleteReplica(req *spdkrpc.ReplicaDeleteRequest) (ret *spdkrpc.Replica, err error) {
 	s.Lock()
 	defer s.Unlock()
 
 	r := s.replicaMap[req.Name]
-	defer func() {
-		if err == nil && req.CleanupRequired {
-			delete(s.replicaMap, req.Name)
-		}
-	}()
-
 	if r != nil {
-		if err := r.Delete(s.spdkClient, req.CleanupRequired, s.portAllocator); err != nil {
-			return nil, err
-		}
+		ret = ServiceReplicaToProtoReplica(r)
+		err = r.Delete(s.spdkClient, req.CleanupRequired, s.portAllocator)
+	}
+	if err == nil && req.CleanupRequired {
+		delete(s.replicaMap, req.Name)
 	}
 
-	return &empty.Empty{}, nil
+	return ret, err
 }
 
 func (s *Server) ReplicaGet(ctx context.Context, req *spdkrpc.ReplicaGetRequest) (ret *spdkrpc.Replica, err error) {
@@ -187,7 +245,30 @@ func (s *Server) ReplicaList(ctx context.Context, req *empty.Empty) (*spdkrpc.Re
 }
 
 func (s *Server) ReplicaWatch(req *empty.Empty, srv spdkrpc.SPDKService_ReplicaWatchServer) error {
-	// TODO: Implement this
+	responseCh, err := s.subscribe(types.InstanceTypeReplica)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			logrus.WithError(err).Error("SPDK service update watch errored out")
+		} else {
+			logrus.Info("SPDK service update watch ended successfully")
+		}
+	}()
+	logrus.Info("Started new SPDK service update watch")
+
+	for resp := range responseCh {
+		r, ok := resp.(*spdkrpc.Replica)
+		if !ok {
+			return grpcstatus.Error(grpccodes.Internal, "cannot get Replica from channel")
+		}
+		if err := srv.Send(r); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -221,12 +302,11 @@ func (s *Server) ReplicaSnapshotDelete(ctx context.Context, req *spdkrpc.Snapsho
 	if r == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find replica %s during snapshot delete", req.Name)
 	}
-
 	_, err = r.SnapshotDelete(s.spdkClient, req.Name)
 	return &empty.Empty{}, err
 }
 
-func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequest) (ret *spdkrpc.Engine, err error) {
+func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequest) (e *spdkrpc.Engine, err error) {
 	if req.Name == "" || req.VolumeName == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name and volume name are required")
 	}
@@ -237,6 +317,19 @@ func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequ
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend is required")
 	}
 
+	e, err = s.createEngine(req)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, errors.Wrapf(err, "failed to create engine %s", req.Name).Error())
+	}
+
+	eCopy := &spdkrpc.Engine{}
+	*eCopy = *e
+
+	s.updateChs[types.InstanceTypeEngine] <- interface{}(eCopy)
+	return e, nil
+}
+
+func (s *Server) createEngine(req *spdkrpc.EngineCreateRequest) (ret *spdkrpc.Engine, err error) {
 	s.Lock()
 	defer s.Unlock()
 
@@ -265,23 +358,35 @@ func (s *Server) getLocalReplicaBdevMap(replicaAddressMap map[string]string) (re
 }
 
 func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequest) (ret *empty.Empty, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	}
+
+	e, err := s.deleteEngine(req)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, errors.Wrapf(err, "failed to delete engine %s", req.Name).Error())
+	}
+	if e != nil {
+		s.updateChs[types.InstanceTypeEngine] <- interface{}(e)
+	}
+
+	return &empty.Empty{}, err
+}
+
+func (s *Server) deleteEngine(req *spdkrpc.EngineDeleteRequest) (ret *spdkrpc.Engine, err error) {
 	s.Lock()
 	defer s.Unlock()
 
 	e := s.engineMap[req.Name]
-	defer func() {
-		if err == nil {
-			delete(s.engineMap, req.Name)
-		}
-	}()
-
 	if e != nil {
-		if err := e.Delete(s.spdkClient, s.portAllocator); err != nil {
-			return nil, err
-		}
+		ret = ServiceEngineToProtoEngine(e)
+		err = e.Delete(s.spdkClient, s.portAllocator)
+	}
+	if err == nil {
+		delete(s.engineMap, req.Name)
 	}
 
-	return &empty.Empty{}, nil
+	return ret, err
 }
 
 func (s *Server) EngineGet(ctx context.Context, req *spdkrpc.EngineGetRequest) (ret *spdkrpc.Engine, err error) {
@@ -309,7 +414,31 @@ func (s *Server) EngineList(ctx context.Context, req *empty.Empty) (*spdkrpc.Eng
 }
 
 func (s *Server) EngineWatch(req *empty.Empty, srv spdkrpc.SPDKService_EngineWatchServer) error {
-	// TODO: Implement this
+	responseCh, err := s.subscribe(types.InstanceTypeEngine)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			logrus.WithError(err).Error("SPDK service update watch errored out")
+		} else {
+			logrus.Info("SPDK service update watch ended successfully")
+		}
+	}()
+	logrus.Info("Started new SPDK service update watch")
+
+	for resp := range responseCh {
+		e, ok := resp.(*spdkrpc.Engine)
+		if !ok {
+			return grpcstatus.Error(grpccodes.Internal, "cannot get Engine from channel")
+		}
+
+		if err := srv.Send(e); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -370,4 +499,12 @@ func (s *Server) VersionDetailGet(context.Context, *empty.Empty) (*spdkrpc.Versi
 	return &spdkrpc.VersionDetailGetReply{
 		Version: &spdkrpc.VersionOutput{},
 	}, nil
+}
+
+func (s *Server) subscribe(t types.InstanceType) (<-chan interface{}, error) {
+	return s.broadcasters[t].Subscribe(context.TODO(), s.broadcastConnector, string(t))
+}
+
+func (s *Server) broadcastConnector(t string) (chan interface{}, error) {
+	return s.broadcastChs[types.InstanceType(t)], nil
 }
