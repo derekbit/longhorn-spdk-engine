@@ -275,3 +275,35 @@ func (c *SPDKClient) DiskDelete(diskName, diskUUID string) error {
 	})
 	return err
 }
+
+func (c *SPDKClient) DiskLvolList(diskName string) (*spdkrpc.DiskLvolListResponse, error) {
+	if diskName == "" {
+		return nil, fmt.Errorf("failed to list lvols on disk: missing required parameter")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.DiskLvolList(ctx, &spdkrpc.DiskLvolListRequest{
+		DiskName: diskName,
+	})
+}
+
+func (c *SPDKClient) DiskLvolDelete(diskName, diskUUID, lvolName string) error {
+	if diskName == "" || diskUUID == "" || lvolName == "" {
+		return fmt.Errorf("failed to delete lvol on disk: missing required parameters")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.DiskLvolDelete(ctx, &spdkrpc.DiskLvolDeleteRequest{
+		DiskName: diskName,
+		DiskUuid: diskUUID,
+		LvolName: lvolName,
+	})
+
+	return err
+}

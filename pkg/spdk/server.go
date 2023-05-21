@@ -481,6 +481,18 @@ func (s *Server) DiskGet(ctx context.Context, req *spdkrpc.DiskGetRequest) (ret 
 	return svcDiskGet(s.spdkClient, req.DiskName, req.DiskPath)
 }
 
+func (s *Server) DiskLvolList(ctx context.Context, req *spdkrpc.DiskLvolListRequest) (ret *spdkrpc.DiskLvolListResponse, err error) {
+	s.Lock()
+	defer s.Unlock()
+	return svcDiskLvolList(s.spdkClient, req.DiskName)
+}
+
+func (s *Server) DiskLvolDelete(ctx context.Context, req *spdkrpc.DiskLvolDeleteRequest) (ret *empty.Empty, err error) {
+	s.Lock()
+	defer s.Unlock()
+	return svcDiskLvolDelete(s.spdkClient, req.DiskName, req.DiskUuid, req.LvolName)
+}
+
 func (s *Server) VersionDetailGet(context.Context, *empty.Empty) (*spdkrpc.VersionDetailGetReply, error) {
 	// TODO: Implement this
 	return &spdkrpc.VersionDetailGetReply{

@@ -156,6 +156,96 @@ func svcDiskGet(spdkClient *spdkclient.Client, diskName, diskPath string) (ret *
 	return lvstoreToDisk(spdkClient, diskPath, diskName, "")
 }
 
+func svcDiskLvolList(spdkClient *spdkclient.Client, diskName string) (ret *spdkrpc.DiskLvolListResponse, err error) {
+	log := logrus.WithFields(logrus.Fields{
+		"diskName": diskName,
+	})
+
+	log.Info("Listing logical volumes")
+	defer func() {
+		if err != nil {
+			log.WithError(err).Error("Failed to get logical volumes")
+		} else {
+			log.Info("Listed logical volumes")
+		}
+	}()
+
+	if diskName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "disk name is required")
+	}
+
+	resp, err := spdkClient.BdevLvolGetLvols(diskName, "")
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, errors.Wrapf(err, "failed to get lvols for disk %v", diskName).Error())
+	}
+
+	lvols := map[string]*spdkrpc.Lvol{}
+
+	for _, vol := range resp {
+		aliasName := fmt.Sprintf("%s/%s", diskName, vol.Name)
+		bdevLvols, err := spdkClient.BdevLvolGet(aliasName, 0)
+		if err != nil {
+			log.WithError(err).Warnf("Failed to get lvol %v", aliasName)
+			continue
+		}
+
+		bdevLvol := &bdevLvols[0]
+
+		lvols[vol.Name] = &spdkrpc.Lvol{
+			Name:       bdevLvol.Name,
+			Uuid:       bdevLvol.UUID,
+			SpecSize:   uint64(bdevLvol.BlockSize) * bdevLvol.NumBlocks,
+			ActualSize: uint64(bdevLvol.BlockSize) * bdevLvol.NumBlocks,
+			Parent:     "",
+			Children:   nil,
+		}
+	}
+
+	return &spdkrpc.DiskLvolListResponse{
+		Lvols: lvols,
+	}, nil
+}
+
+func svcDiskLvolDelete(spdkClient *spdkclient.Client, diskName, diskUUID, lvolName string) (ret *empty.Empty, err error) {
+	log := logrus.WithFields(logrus.Fields{
+		"diskName": diskName,
+		"diskUUID": diskUUID,
+		"lvolName": lvolName,
+	})
+
+	log.Info("Deleting logical volume")
+	defer func() {
+		if err != nil {
+			log.WithError(err).Error("Failed to delete logical volume")
+		} else {
+			log.Info("Deleted logical volume")
+		}
+	}()
+
+	if diskName == "" || diskUUID == "" || lvolName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "disk name, disk UUID, and lvol name are required")
+	}
+
+	lvstores, err := spdkClient.BdevLvolGetLvstore("", diskUUID)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, errors.Wrapf(err, "failed to get lvstore with UUID %v", diskUUID).Error())
+	}
+
+	lvstore := lvstores[0]
+
+	if lvstore.Name != diskName {
+		log.Warnf("Disk name %v does not match lvstore name %v", diskName, lvstore.Name)
+	}
+
+	name := fmt.Sprintf("%s/%s", lvstore.Name, lvolName)
+	_, err = spdkClient.BdevLvolDelete(name)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, errors.Wrapf(err, "failed to delete lvol %v", name).Error())
+	}
+
+	return &empty.Empty{}, nil
+}
+
 func getDiskPath(path string) string {
 	return filepath.Join(hostPrefix, path)
 }

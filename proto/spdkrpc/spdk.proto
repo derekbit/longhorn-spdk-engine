@@ -25,6 +25,8 @@ service SPDKService {
     rpc DiskCreate(DiskCreateRequest) returns (Disk);
     rpc DiskDelete(DiskDeleteRequest) returns (google.protobuf.Empty);
     rpc DiskGet(DiskGetRequest) returns (Disk);
+    rpc DiskLvolList(DiskLvolListRequest) returns (DiskLvolListResponse);
+    rpc DiskLvolDelete(DiskLvolDeleteRequest) returns (google.protobuf.Empty);
 
     rpc VersionDetailGet(google.protobuf.Empty) returns(VersionDetailGetReply);
 }
@@ -162,7 +164,21 @@ message DiskGetRequest {
     string disk_path = 2;
 }
 
+message DiskLvolListRequest {
+    string disk_name = 1;
+}
+
+message DiskLvolListResponse {
+	map<string, Lvol> lvols = 1;
+}
+
 message DiskDeleteRequest {
     string disk_name = 1;
     string disk_uuid = 2;
+}
+
+message DiskLvolDeleteRequest {
+    string disk_name = 1;
+    string disk_uuid = 2;
+    string lvol_name = 3;
 }
