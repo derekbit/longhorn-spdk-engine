@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+
+cd "$(dirname $0)"/..
+
+echo Running tests
+
+mount --rbind /host/dev /dev
+mount --rbind /host/sys /sys
+trap "umount /dev && umount /sys" EXIT
+
+# Do cleanup first
+losetup -D
+trap "losetup -D" EXIT
+
+PACKAGES="$(find . -name '*.go' -print0 | xargs -0 -I{} dirname {} |  cut -f2 -d/ | sort -u | grep -Ev '(^\.$|.git|.trash-cache|vendor|bin)' | sed -e 's!^!./!' -e 's!$!/...!')"
+
+go test -v -race -cover ${PACKAGES} -timeout 5m
