@@ -1,8 +1,11 @@
 package spdk
 
 import (
+	"crypto/sha512"
+	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 
@@ -17,6 +20,8 @@ const (
 
 	ReplicaRebuildingLvolSuffix  = "rebuilding"
 	RebuildingSnapshotNamePrefix = "rebuild"
+
+	imageChecksumNameLength = 8
 )
 
 func GetReplicaSnapshotLvolNamePrefix(replicaName string) string {
@@ -53,4 +58,34 @@ func GetServiceClient(address string) (*client.SPDKClient, error) {
 
 	// TODO: Can we share the clients in the whole server?
 	return client.NewSPDKClient(addr)
+}
+
+func GetEngineNameWithInstanceManagerImageChecksumName(engineName string) string {
+	image := os.Getenv("INSTANCE_MANAGER_IMAGE")
+	if image == "" {
+		return engineName
+	}
+
+	return engineName + "-" + getStringChecksum(strings.TrimSpace(image))[:imageChecksumNameLength]
+}
+
+func getStringChecksum(data string) string {
+	return getChecksumSHA512([]byte(data))
+}
+
+func getChecksumSHA512(data []byte) string {
+	checksum := sha512.Sum512(data)
+	return hex.EncodeToString(checksum[:])
+}
+
+func GetEngineName(name string) string {
+	parts := strings.Split(name, "-")
+
+	for i := len(parts) - 1; i >= 0; i-- {
+		if i > 0 && len(parts[i]) > 0 {
+			truncated := strings.Join(parts[:i], "-")
+			return truncated
+		}
+	}
+	return name
 }

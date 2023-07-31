@@ -308,6 +308,60 @@ func (c *SPDKClient) EngineCreate(name, volumeName, frontend string, specSize ui
 	return api.ProtoEngineToEngine(resp), nil
 }
 
+func (c *SPDKClient) EngineReplaceStart(name string) error {
+	if name == "" {
+		return fmt.Errorf("failed to start replacing SPDK engine: missing required parameter")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.EngineReplaceStart(ctx, &spdkrpc.EngineReplaceStartRequest{
+		Name: name,
+	})
+	return err
+}
+
+func (c *SPDKClient) EngineReplaceFinish(name string) error {
+	if name == "" {
+		return fmt.Errorf("failed to finish replacing SPDK engine: missing required parameter")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.EngineReplaceFinish(ctx, &spdkrpc.EngineReplaceFinishRequest{
+		Name: name,
+	})
+	return err
+}
+
+func (c *SPDKClient) EngineReplace(name, volumeName, frontend string, specSize uint64, replicaAddressMap map[string]string, portCount int32) (*api.Engine, error) {
+	if name == "" || volumeName == "" || len(replicaAddressMap) == 0 {
+		return nil, fmt.Errorf("failed to replace SPDK engine: missing required parameters")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	resp, err := client.EngineReplace(ctx, &spdkrpc.EngineReplaceRequest{
+		Name:              name,
+		VolumeName:        volumeName,
+		SpecSize:          specSize,
+		ReplicaAddressMap: replicaAddressMap,
+		Frontend:          frontend,
+		PortCount:         portCount,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to replace SPDK engine")
+	}
+
+	return api.ProtoEngineToEngine(resp), nil
+}
+
 func (c *SPDKClient) EngineDelete(name string) error {
 	if name == "" {
 		return fmt.Errorf("failed to delete SPDK engine: missing required parameter")

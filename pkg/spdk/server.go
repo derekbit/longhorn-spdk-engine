@@ -537,6 +537,8 @@ func (s *Server) ReplicaRebuildingDstSnapshotCreate(ctx context.Context, req *sp
 }
 
 func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequest) (ret *spdkrpc.Engine, err error) {
+	logrus.Infof("Creating engine %v", req.Name)
+
 	if req.Name == "" || req.VolumeName == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name and volume name are required")
 	}
@@ -547,17 +549,104 @@ func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequ
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend is required")
 	}
 
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
 	s.Lock()
-	if _, ok := s.engineMap[req.Name]; ok {
+	if _, ok := s.engineMap[name]; ok {
 		s.Unlock()
-		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", req.Name)
+		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", name)
 	}
 
-	s.engineMap[req.Name] = NewEngine(req.Name, req.VolumeName, req.Frontend, req.SpecSize, s.updateChs[types.InstanceTypeEngine])
-	e := s.engineMap[req.Name]
+	s.engineMap[name] = NewEngine(name, req.VolumeName, req.Frontend, req.SpecSize, s.updateChs[types.InstanceTypeEngine])
+	e := s.engineMap[name]
 	s.Unlock()
 
-	return e.Create(s.spdkClient, req.ReplicaAddressMap, s.getLocalReplicaLvsNameMap(req.ReplicaAddressMap), req.PortCount, s.portAllocator)
+	return e.Create(s.spdkClient, req.ReplicaAddressMap, s.getLocalReplicaLvsNameMap(req.ReplicaAddressMap), req.PortCount, s.portAllocator, false)
+}
+
+func (s *Server) EngineReplaceStart(ctx context.Context, req *spdkrpc.EngineReplaceStartRequest) (ret *empty.Empty, err error) {
+	logrus.Infof("Starting replacing engine %v", req.Name)
+
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	}
+
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
+	s.RLock()
+	defer s.RUnlock()
+
+	e := s.engineMap[name]
+	if e == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v", name)
+	}
+
+	err = e.Suspend()
+	if err != nil {
+		logrus.WithError(err).Errorf("failed to suspend engine %v", name)
+		return nil, err
+	}
+
+	logrus.Infof("Engine %v is suspended", name)
+
+	return &empty.Empty{}, nil
+}
+
+func (s *Server) EngineReplaceFinish(ctx context.Context, req *spdkrpc.EngineReplaceFinishRequest) (ret *empty.Empty, err error) {
+	logrus.Infof("Finishing replacing engine %v", req.Name)
+
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
+	s.RLock()
+	e := s.engineMap[name]
+	s.RUnlock()
+
+	defer func() {
+		if err == nil {
+			delete(s.engineMap, name)
+		}
+	}()
+
+	if e != nil {
+		if err := e.Delete(s.spdkClient, s.portAllocator, true); err != nil {
+			return nil, err
+		}
+	}
+
+	return &empty.Empty{}, nil
+}
+
+func (s *Server) EngineReplace(ctx context.Context, req *spdkrpc.EngineReplaceRequest) (ret *spdkrpc.Engine, err error) {
+	logrus.Infof("Replacing engine %v", req.Name)
+
+	if req.Name == "" || req.VolumeName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name and volume name are required")
+	}
+	if req.SpecSize == 0 {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine spec size is required")
+	}
+	if req.Frontend != types.FrontendSPDKTCPBlockdev && req.Frontend != types.FrontendSPDKTCPNvmf && req.Frontend != types.FrontendEmpty {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend is required")
+	}
+
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
+	s.Lock()
+	if _, ok := s.engineMap[name]; ok {
+		s.Unlock()
+		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", name)
+	}
+
+	s.engineMap[name] = NewEngine(name, req.VolumeName, req.Frontend, req.SpecSize, s.updateChs[types.InstanceTypeEngine])
+	e := s.engineMap[name]
+	s.Unlock()
+
+	ret, err = e.Create(s.spdkClient, req.ReplicaAddressMap, s.getLocalReplicaLvsNameMap(req.ReplicaAddressMap), req.PortCount, s.portAllocator, true)
+	if err != nil {
+		logrus.WithError(err).Errorf("failed to replace engine %v", name)
+	}
+
+	return ret, err
 }
 
 func (s *Server) getLocalReplicaLvsNameMap(replicaMap map[string]string) (replicaLvsNameMap map[string]string) {
@@ -574,18 +663,22 @@ func (s *Server) getLocalReplicaLvsNameMap(replicaMap map[string]string) (replic
 }
 
 func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequest) (ret *empty.Empty, err error) {
+	logrus.Infof("Deleting engine %v", req.Name)
+
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
 	s.RLock()
-	e := s.engineMap[req.Name]
+	e := s.engineMap[name]
 	s.RUnlock()
 
 	defer func() {
 		if err == nil {
-			delete(s.engineMap, req.Name)
+			delete(s.engineMap, name)
 		}
 	}()
 
 	if e != nil {
-		if err := e.Delete(s.spdkClient, s.portAllocator); err != nil {
+		if err := e.Delete(s.spdkClient, s.portAllocator, false); err != nil {
 			return nil, err
 		}
 	}
@@ -594,12 +687,14 @@ func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequ
 }
 
 func (s *Server) EngineGet(ctx context.Context, req *spdkrpc.EngineGetRequest) (ret *spdkrpc.Engine, err error) {
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
 	s.RLock()
-	e := s.engineMap[req.Name]
+	e := s.engineMap[name]
 	s.RUnlock()
 
 	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v", req.Name)
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v", name)
 	}
 
 	return e.Get(), nil
@@ -616,13 +711,16 @@ func (s *Server) EngineList(ctx context.Context, req *empty.Empty) (*spdkrpc.Eng
 	s.RUnlock()
 
 	for engineName, e := range engineMap {
-		res[engineName] = e.Get()
+		name := GetEngineName(engineName)
+		res[name] = e.Get()
 	}
 
 	return &spdkrpc.EngineListResponse{Engines: res}, nil
 }
 
 func (s *Server) EngineWatch(req *empty.Empty, srv spdkrpc.SPDKService_EngineWatchServer) error {
+	logrus.Infof("Watching engine updates")
+
 	responseCh, err := s.Subscribe(types.InstanceTypeEngine)
 	if err != nil {
 		return err
@@ -657,13 +755,15 @@ func (s *Server) EngineWatch(req *empty.Empty, srv spdkrpc.SPDKService_EngineWat
 }
 
 func (s *Server) EngineReplicaAdd(ctx context.Context, req *spdkrpc.EngineReplicaAddRequest) (ret *empty.Empty, err error) {
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.EngineName)
+
 	s.RLock()
-	e := s.engineMap[req.EngineName]
+	e := s.engineMap[name]
 	localReplicaLvsNameMap := s.getLocalReplicaLvsNameMap(map[string]string{req.ReplicaName: ""})
 	s.RUnlock()
 
 	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s add", req.EngineName, req.ReplicaName, req.ReplicaAddress)
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s add", name, req.ReplicaName, req.ReplicaAddress)
 	}
 
 	if err := e.ReplicaAddStart(req.ReplicaName, req.ReplicaAddress); err != nil {
@@ -683,12 +783,14 @@ func (s *Server) EngineReplicaAdd(ctx context.Context, req *spdkrpc.EngineReplic
 }
 
 func (s *Server) EngineReplicaDelete(ctx context.Context, req *spdkrpc.EngineReplicaDeleteRequest) (ret *empty.Empty, err error) {
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.EngineName)
+
 	s.RLock()
-	e := s.engineMap[req.EngineName]
+	e := s.engineMap[name]
 	s.RUnlock()
 
 	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s delete", req.EngineName, req.ReplicaName, req.ReplicaAddress)
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s delete", name, req.ReplicaName, req.ReplicaAddress)
 	}
 
 	if err := e.ReplicaDelete(s.spdkClient, req.ReplicaName, req.ReplicaAddress); err != nil {
@@ -703,12 +805,14 @@ func (s *Server) EngineSnapshotCreate(ctx context.Context, req *spdkrpc.Snapshot
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name and snapshot name are required")
 	}
 
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
 	s.RLock()
-	e := s.engineMap[req.Name]
+	e := s.engineMap[name]
 	s.RUnlock()
 
 	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for snapshot creation", req.Name)
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for snapshot creation", name)
 	}
 
 	return e.SnapshotCreate(req.SnapshotName)
@@ -719,12 +823,14 @@ func (s *Server) EngineSnapshotDelete(ctx context.Context, req *spdkrpc.Snapshot
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name and snapshot name are required")
 	}
 
+	name := GetEngineNameWithInstanceManagerImageChecksumName(req.Name)
+
 	s.RLock()
-	e := s.engineMap[req.Name]
+	e := s.engineMap[name]
 	s.RUnlock()
 
 	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for snapshot deletion", req.Name)
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for snapshot deletion", name)
 	}
 
 	if _, err := e.SnapshotDelete(req.SnapshotName); err != nil {

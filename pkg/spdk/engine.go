@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
@@ -34,6 +35,8 @@ type Engine struct {
 	Port               int32
 	Frontend           string
 	Endpoint           string
+
+	RequestUpgrade bool
 
 	State types.InstanceState
 
@@ -73,7 +76,43 @@ func NewEngine(engineName, volumeName, frontend string, specSize uint64, engineU
 	}
 }
 
-func (e *Engine) Create(spdkClient *SPDKClient, replicaAddressMap, localReplicaLvsNameMap map[string]string, portCount int32, superiorPortAllocator *util.Bitmap) (ret *spdkrpc.Engine, err error) {
+func (e *Engine) Suspend() (err error) {
+	requireUpdate := false
+
+	e.Lock()
+	defer func() {
+		if err != nil && e.State != types.InstanceStateError {
+			e.State = types.InstanceStateError
+		}
+		e.Unlock()
+
+		if requireUpdate {
+			e.UpdateCh <- nil
+		}
+	}()
+
+	if e.Endpoint == "" {
+		return errors.Wrapf(err, "cannot find endpoint for engine %s", e.Name)
+	}
+
+	nqn := helpertypes.GetNQN(e.Name)
+
+	initiator, err := nvme.NewInitiator(e.VolumeName, nqn, nvme.HostProc)
+	if err != nil {
+		return err
+	}
+
+	if err := initiator.Suspend(); err != nil {
+		return err
+	}
+
+	requireUpdate = true
+	e.RequestUpgrade = true
+
+	return nil
+}
+
+func (e *Engine) Create(spdkClient *SPDKClient, replicaAddressMap, localReplicaLvsNameMap map[string]string, portCount int32, superiorPortAllocator *util.Bitmap, requestUpgrade bool) (ret *spdkrpc.Engine, err error) {
 	requireUpdate := true
 
 	e.Lock()
@@ -122,7 +161,7 @@ func (e *Engine) Create(spdkClient *SPDKClient, replicaAddressMap, localReplicaL
 		return nil, err
 	}
 
-	if err := e.handleFrontend(spdkClient, portCount, superiorPortAllocator); err != nil {
+	if err := e.handleFrontend(spdkClient, portCount, superiorPortAllocator, requestUpgrade); err != nil {
 		return nil, err
 	}
 
@@ -155,7 +194,7 @@ func getBdevNameForReplica(spdkClient *SPDKClient, localReplicaLvsNameMap map[st
 	return nvmeBdevNameList[0], nil
 }
 
-func (e *Engine) handleFrontend(spdkClient *SPDKClient, portCount int32, superiorPortAllocator *util.Bitmap) error {
+func (e *Engine) handleFrontend(spdkClient *SPDKClient, portCount int32, superiorPortAllocator *util.Bitmap, requestUpgrade bool) error {
 	if e.Frontend != types.FrontendEmpty && e.Frontend != types.FrontendSPDKTCPNvmf && e.Frontend != types.FrontendSPDKTCPBlockdev {
 		return fmt.Errorf("unknown frontend type %s", e.Frontend)
 	}
@@ -184,10 +223,10 @@ func (e *Engine) handleFrontend(spdkClient *SPDKClient, portCount int32, superio
 	if err != nil {
 		return err
 	}
-	return initiator.Start(e.IP, strconv.Itoa(int(port)))
+	return initiator.Start(e.IP, strconv.Itoa(int(port)), requestUpgrade)
 }
 
-func (e *Engine) Delete(spdkClient *SPDKClient, superiorPortAllocator *util.Bitmap) (err error) {
+func (e *Engine) Delete(spdkClient *SPDKClient, superiorPortAllocator *util.Bitmap, onlyDisconnectTarget bool) (err error) {
 	requireUpdate := false
 
 	e.Lock()
@@ -209,7 +248,7 @@ func (e *Engine) Delete(spdkClient *SPDKClient, superiorPortAllocator *util.Bitm
 		if err != nil {
 			return err
 		}
-		if err := initiator.Stop(); err != nil {
+		if err := initiator.Stop(onlyDisconnectTarget); err != nil {
 			return err
 		}
 
@@ -455,6 +494,10 @@ func (e *Engine) validateAndUpdateFrontend(subsystemMap map[string]*spdktypes.Nv
 
 	switch e.Frontend {
 	case types.FrontendSPDKTCPBlockdev:
+		if e.RequestUpgrade {
+			logrus.Infof("engine %s is being upgraded, skip validating and updating the frontend", e.Name)
+			return nil
+		}
 		initiator, err := nvme.NewInitiator(e.VolumeName, nqn, nvme.HostProc)
 		if err != nil {
 			return err
