@@ -239,20 +239,23 @@ func (c *SPDKClient) ReplicaSnapshotShallowCopy(srcReplicaName, snapshotName str
 	return errors.Wrapf(err, "failed to shallow copy snapshot %s from src replica %s", snapshotName, srcReplicaName)
 }
 
-func (c *SPDKClient) ReplicaRebuildingDstStart(replicaName string, exposeRequired bool) error {
+func (c *SPDKClient) ReplicaRebuildingDstStart(replicaName string, exposeRequired bool) (string, error) {
 	if replicaName == "" {
-		return fmt.Errorf("failed to start replica rebuilding dst: missing required parameter replica name")
+		return "", fmt.Errorf("failed to start replica rebuilding dst: missing required parameter replica name")
 	}
 
 	client := c.getSPDKServiceClient()
 	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
 	defer cancel()
 
-	_, err := client.ReplicaRebuildingDstStart(ctx, &spdkrpc.ReplicaRebuildingDstStartRequest{
+	resp, err := client.ReplicaRebuildingDstStart(ctx, &spdkrpc.ReplicaRebuildingDstStartRequest{
 		Name:           replicaName,
 		ExposeRequired: exposeRequired,
 	})
-	return errors.Wrapf(err, "failed to start replica rebuilding dst %s", replicaName)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to start replica rebuilding dst %s", replicaName)
+	}
+	return resp.Address, nil
 }
 
 func (c *SPDKClient) ReplicaRebuildingDstFinish(replicaName string, unexposeRequired bool) error {
