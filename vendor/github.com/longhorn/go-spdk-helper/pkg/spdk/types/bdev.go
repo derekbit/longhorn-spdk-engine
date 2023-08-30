@@ -38,12 +38,13 @@ func GetBdevType(bdev *BdevInfo) BdevType {
 }
 
 type BdevInfoBasic struct {
-	Name        string          `json:"name"`
-	Aliases     []string        `json:"aliases"`
-	ProductName BdevProductName `json:"product_name"`
-	BlockSize   uint32          `json:"block_size"`
-	NumBlocks   uint64          `json:"num_blocks"`
-	UUID        string          `json:"uuid,omitempty"`
+	Name         string          `json:"name"`
+	Aliases      []string        `json:"aliases"`
+	ProductName  BdevProductName `json:"product_name"`
+	BlockSize    uint32          `json:"block_size"`
+	NumBlocks    uint64          `json:"num_blocks"`
+	UUID         string          `json:"uuid,omitempty"`
+	CreationTime string          `json:"creation_time,omitempty"`
 
 	MdSize               uint32 `json:"md_size,omitempty"`
 	MdInterleave         bool   `json:"md_interleave,omitempty"`
@@ -128,4 +129,11 @@ type BdevGetBdevsRequest struct {
 
 type BdevGetBdevsResponse struct {
 	bdevs []BdevInfo
+}
+
+type BdevLvolFragmap struct {
+	ClusterSize          uint64 `json:"cluster_size"`
+	NumClusters          uint64 `json:"num_clusters"`
+	NumAllocatedClusters uint64 `json:"num_allocated_clusters"`
+	Fragmap              string `json:"fragmap"`
 }

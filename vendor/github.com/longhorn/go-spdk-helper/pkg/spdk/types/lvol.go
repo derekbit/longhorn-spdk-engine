@@ -59,6 +59,11 @@ type BdevLvolRenameLvstoreRequest struct {
 	NewName string `json:"new_name"`
 }
 
+type BdevLvolGetXattrRequest struct {
+	Name      string `json:"name"`
+	XattrName string `json:"xattr_name"`
+}
+
 type BdevLvolGetLvstoreRequest struct {
 	UUID    string `json:"uuid,omitempty"`
 	LvsName string `json:"lvs_name,omitempty"`
@@ -107,6 +112,12 @@ type BdevLvolResizeRequest struct {
 type BdevLvolShallowCopyRequest struct {
 	SrcLvolName string `json:"src_lvol_name"`
 	DstBdevName string `json:"dst_bdev_name"`
+}
+
+type BdevLvolGetFragmapRequest struct {
+	Name   string `json:"name"`
+	Offset uint64 `json:"offset"`
+	Size   uint64 `json:"size"`
 }
 
 func GetLvolAlias(lvsName, lvolName string) string {
