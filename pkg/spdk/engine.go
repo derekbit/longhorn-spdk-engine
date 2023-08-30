@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
@@ -15,6 +16,8 @@ import (
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
 	helperutil "github.com/longhorn/go-spdk-helper/pkg/util"
 
+	"github.com/longhorn/longhorn-spdk-engine/pkg/api"
+	"github.com/longhorn/longhorn-spdk-engine/pkg/client"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/types"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/util"
 	"github.com/longhorn/longhorn-spdk-engine/proto/spdkrpc"
@@ -36,6 +39,8 @@ type Engine struct {
 	Endpoint           string
 
 	State types.InstanceState
+
+	IsRestoring bool
 
 	// UpdateCh should not be protected by the engine lock
 	UpdateCh chan interface{}
@@ -317,6 +322,11 @@ func (e *Engine) ValidateAndUpdate(
 			e.UpdateCh <- nil
 		}
 	}()
+
+	if e.IsRestoring {
+		e.log.Infof("Engine is restoring, will skip the validation and update")
+		return nil
+	}
 
 	// Syncing with the SPDK TGT server only when the engine is running.
 	if e.State != types.InstanceStateRunning {
@@ -879,4 +889,235 @@ func (e *Engine) SetErrorState() {
 		e.State = types.InstanceStateError
 		needUpdate = true
 	}
+}
+
+func (e *Engine) BackupCreate(backupName, volumeName, engineName, snapshotName, backingImageName, backingImageChecksum string,
+	labels []string, backupTarget string, credential map[string]string, concurrentLimit int32, compressionMethod, storageClassName string, size uint64) (*BackupCreateInfo, error) {
+
+	e.Lock()
+	defer e.Unlock()
+
+	replicaName, replicaAddress := "", ""
+	for name, mode := range e.ReplicaModeMap {
+		if mode != types.ModeRW {
+			continue
+		}
+		replicaName = name
+		replicaAddress = e.ReplicaAddressMap[name]
+		break
+	}
+
+	e.log.Infof("Creating backup %s for volume %s on replica %s address %s", backupName, volumeName, replicaName, replicaAddress)
+
+	replicaServiceCli, err := GetServiceClient(replicaAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	recv, err := replicaServiceCli.ReplicaBackupCreate(&client.BackupCreateRequest{
+		BackupName:           backupName,
+		SnapshotName:         snapshotName,
+		VolumeName:           volumeName,
+		ReplicaName:          replicaName,
+		Size:                 size,
+		BackupTarget:         backupTarget,
+		StorageClassName:     storageClassName,
+		BackingImageName:     backingImageName,
+		BackingImageChecksum: backingImageChecksum,
+		CompressionMethod:    compressionMethod,
+		ConcurrentLimit:      concurrentLimit,
+		Labels:               labels,
+		Credential:           credential,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &BackupCreateInfo{
+		BackupName:     recv.Backup,
+		IsIncremental:  recv.IsIncremental,
+		ReplicaAddress: replicaAddress,
+	}, nil
+}
+
+func (e *Engine) BackupStatus(backupName, replicaAddress string) (*spdkrpc.BackupStatusResponse, error) {
+	e.Lock()
+	defer e.Unlock()
+
+	found := false
+	for name, mode := range e.ReplicaModeMap {
+		if e.ReplicaAddressMap[name] == replicaAddress {
+			if mode != types.ModeRW {
+				return nil, fmt.Errorf("replica %s is not in RW mode", name)
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("replica address %s is not found in engine %s", replicaAddress, e.Name)
+	}
+
+	replicaServiceCli, err := GetServiceClient(replicaAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	return replicaServiceCli.ReplicaBackupStatus(backupName)
+}
+
+func (e *Engine) getSnapshotsInfo() (map[string]*api.Lvol, error) {
+	lvols := map[string]*api.Lvol{}
+
+	for name, address := range e.ReplicaAddressMap {
+		if e.ReplicaModeMap[name] != types.ModeRW {
+			continue
+		}
+
+		replicaServiceCli, err := GetServiceClient(address)
+		if err != nil {
+			return nil, err
+		}
+
+		replica, err := replicaServiceCli.ReplicaGet(name)
+		if err != nil {
+			return nil, err
+		}
+
+		newLvols := make(map[string]*api.Lvol)
+		for name, lvol := range replica.Snapshots {
+			snapshot := ""
+
+			if name == replica.Name {
+				snapshot = lvol.Name
+			} else {
+				snapshot = lvol.Name
+			}
+
+			children := map[string]bool{}
+			for childName := range lvol.Children {
+				child := ""
+				if name == replica.Name {
+					child = childName
+				} else {
+					child = childName
+				}
+				children[child] = true
+			}
+			parent := ""
+			if lvol.Parent != "" {
+				parent = lvol.Parent
+			}
+			lvol := &api.Lvol{
+				Name:         snapshot,
+				UUID:         lvol.UUID,
+				SpecSize:     lvol.SpecSize,
+				ActualSize:   lvol.ActualSize,
+				Parent:       parent,
+				Children:     children,
+				CreationTime: lvol.CreationTime,
+			}
+			newLvols[snapshot] = lvol
+		}
+
+		if len(newLvols) > len(lvols) {
+			lvols = newLvols
+		}
+	}
+	return lvols, nil
+}
+
+func (e *Engine) BackupRestore(spdkClient *SPDKClient, backupUrl, engineName, snapshotName string, credential map[string]string, concurrentLimit int32) error {
+	e.Lock()
+	defer e.Unlock()
+
+	e.log.Infof("Deleting RAID bdev %s before restore", e.Name)
+	if _, err := spdkClient.BdevRaidDelete(e.Name); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
+		return err
+	}
+
+	e.IsRestoring = true
+
+	e.log.Infof("Getting snapshot info before restoring backup")
+	snapshots, err := e.getSnapshotsInfo()
+	if err != nil {
+		return errors.Wrapf(err, "failed to get snapshot info before the incremental restore")
+	}
+
+	if len(snapshots) == 0 {
+		if snapshotName == "" {
+			snapshotName = util.UUID()
+			e.log.Infof("Generating a snapshot name %s for the full restore", snapshotName)
+		}
+	}
+
+	// TODO: handle partial failures
+	for replicaName, replicaAddress := range e.ReplicaAddressMap {
+		e.log.Infof("Restoring backup on replica %s address %s", replicaName, replicaAddress)
+
+		replicaServiceCli, err := GetServiceClient(replicaAddress)
+		if err != nil {
+			return err
+		}
+
+		err = replicaServiceCli.ReplicaBackupRestore(&client.BackupRestoreRequest{
+			BackupUrl:       backupUrl,
+			ReplicaName:     replicaName,
+			SnapshotName:    snapshotName,
+			Credential:      credential,
+			ConcurrentLimit: concurrentLimit,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (e *Engine) BackupRestoreFinish(spdkClient *SPDKClient) error {
+	e.Lock()
+	defer e.Unlock()
+
+	replicaBdevList := []string{}
+	for _, bdevName := range e.ReplicaBdevNameMap {
+		replicaBdevList = append(replicaBdevList, bdevName)
+	}
+
+	e.log.Infof("Creating RAID bdev %s before finishing restore", e.Name)
+	if _, err := spdkClient.BdevRaidCreate(e.Name, spdktypes.BdevRaidLevel1, 0, replicaBdevList); err != nil {
+		e.log.WithError(err).Errorf("Failed to create RAID bdev before finishing restore")
+		return err
+	}
+
+	e.IsRestoring = false
+
+	return nil
+}
+
+func (e *Engine) RestoreStatus() (*spdkrpc.RestoreStatusResponse, error) {
+	resp := &spdkrpc.RestoreStatusResponse{
+		Status: map[string]*spdkrpc.ReplicaRestoreStatusResponse{},
+	}
+
+	e.Lock()
+	defer e.Unlock()
+
+	for replicaName, replicaAddress := range e.ReplicaAddressMap {
+		if e.ReplicaModeMap[replicaName] != types.ModeRW {
+			continue
+		}
+
+		replicaServiceCli, err := GetServiceClient(replicaAddress)
+		if err != nil {
+			return nil, err
+		}
+		status, err := replicaServiceCli.ReplicaRestoreStatus(replicaName)
+		if err != nil {
+			return nil, err
+		}
+		resp.Status[replicaAddress] = status
+	}
+
+	return resp, nil
 }
