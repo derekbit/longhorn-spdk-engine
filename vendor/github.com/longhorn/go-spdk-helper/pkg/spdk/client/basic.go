@@ -197,6 +197,21 @@ func (c *Client) BdevLvolCreate(lvstoreName, lvstoreUUID, lvolName string, sizeI
 	return uuid, json.Unmarshal(cmdOutput, &uuid)
 }
 
+// BdevLvolGetXattr gets the value of an extended attribute of a logical volume.
+func (c *Client) BdevLvolGetXattr(name, xattrName string) (value string, err error) {
+	req := spdktypes.BdevLvolGetXattrRequest{
+		Name:      name,
+		XattrName: xattrName,
+	}
+
+	cmdOutput, err := c.jsonCli.SendCommand("bdev_lvol_get_xattr", req)
+	if err != nil {
+		return "", err
+	}
+
+	return value, json.Unmarshal(cmdOutput, &value)
+}
+
 // BdevLvolDelete destroys a logical volume.
 //
 //	"name": Required. UUID or alias of the logical volume. The alias of a lvol is <LVSTORE NAME>/<LVOL NAME>.
@@ -339,6 +354,36 @@ func (c *Client) BdevLvolShallowCopy(srcLvolName, dstBdevName string) (copied bo
 	}
 
 	return copied, json.Unmarshal(cmdOutput, &copied)
+}
+
+// BdevLvolGetFragmap get the fragment map of a logical volume.
+//
+//	"lvsName": Required. Name of logical volume store containing the logical volume.
+//
+//	"lvolName": Required. Name of the logical volume.
+//
+//	"offset": Optional. Offset in bytes of the portion of the logical volume for which to get the fragment map.
+//
+//	"size": Optional. Size in bytes of the portion of the logical volume for which to get the fragment map.
+func (c *Client) BdevLvolGetFragmap(lvsName, lvolName string, offset, size uint64) (*spdktypes.BdevLvolFragmap, error) {
+	req := spdktypes.BdevLvolGetFragmapRequest{
+		LvsName:  lvsName,
+		LvolName: lvsName + "/" + lvolName,
+		Offset:   offset,
+		Size:     size,
+	}
+
+	cmdOutput, err := c.jsonCli.SendCommandWithLongTimeout("bdev_lvol_get_fragmap", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var result spdktypes.BdevLvolFragmap
+	err = json.Unmarshal(cmdOutput, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // BdevRaidCreate constructs a new RAID bdev.
