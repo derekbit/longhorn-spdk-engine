@@ -60,6 +60,7 @@ type Lvol struct {
 	ActualSize           uint64          `protobuf:"varint,4,opt,name=actual_size,json=actualSize,proto3" json:"actual_size,omitempty"`
 	Parent               string          `protobuf:"bytes,5,opt,name=parent,proto3" json:"parent,omitempty"`
 	Children             map[string]bool `protobuf:"bytes,6,rep,name=children,proto3" json:"children,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"varint,2,opt,name=value,proto3"`
+	CreationTime         string          `protobuf:"bytes,7,opt,name=creation_time,json=creationTime,proto3" json:"creation_time,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}        `json:"-"`
 	XXX_unrecognized     []byte          `json:"-"`
 	XXX_sizecache        int32           `json:"-"`
@@ -130,6 +131,13 @@ func (m *Lvol) GetChildren() map[string]bool {
 		return m.Children
 	}
 	return nil
+}
+
+func (m *Lvol) GetCreationTime() string {
+	if m != nil {
+		return m.CreationTime
+	}
+	return ""
 }
 
 type Replica struct {
@@ -1115,6 +1123,84 @@ func (m *EngineReplicaAddRequest) GetReplicaAddress() string {
 	return ""
 }
 
+type EngineReplicaListRequest struct {
+	EngineName           string   `protobuf:"bytes,1,opt,name=engine_name,json=engineName,proto3" json:"engine_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *EngineReplicaListRequest) Reset()         { *m = EngineReplicaListRequest{} }
+func (m *EngineReplicaListRequest) String() string { return proto.CompactTextString(m) }
+func (*EngineReplicaListRequest) ProtoMessage()    {}
+func (*EngineReplicaListRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{18}
+}
+
+func (m *EngineReplicaListRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_EngineReplicaListRequest.Unmarshal(m, b)
+}
+func (m *EngineReplicaListRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_EngineReplicaListRequest.Marshal(b, m, deterministic)
+}
+func (m *EngineReplicaListRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_EngineReplicaListRequest.Merge(m, src)
+}
+func (m *EngineReplicaListRequest) XXX_Size() int {
+	return xxx_messageInfo_EngineReplicaListRequest.Size(m)
+}
+func (m *EngineReplicaListRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_EngineReplicaListRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_EngineReplicaListRequest proto.InternalMessageInfo
+
+func (m *EngineReplicaListRequest) GetEngineName() string {
+	if m != nil {
+		return m.EngineName
+	}
+	return ""
+}
+
+type EngineReplicaListResponse struct {
+	Replicas             map[string]*Replica `protobuf:"bytes,1,rep,name=replicas,proto3" json:"replicas,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
+	XXX_unrecognized     []byte              `json:"-"`
+	XXX_sizecache        int32               `json:"-"`
+}
+
+func (m *EngineReplicaListResponse) Reset()         { *m = EngineReplicaListResponse{} }
+func (m *EngineReplicaListResponse) String() string { return proto.CompactTextString(m) }
+func (*EngineReplicaListResponse) ProtoMessage()    {}
+func (*EngineReplicaListResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{19}
+}
+
+func (m *EngineReplicaListResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_EngineReplicaListResponse.Unmarshal(m, b)
+}
+func (m *EngineReplicaListResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_EngineReplicaListResponse.Marshal(b, m, deterministic)
+}
+func (m *EngineReplicaListResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_EngineReplicaListResponse.Merge(m, src)
+}
+func (m *EngineReplicaListResponse) XXX_Size() int {
+	return xxx_messageInfo_EngineReplicaListResponse.Size(m)
+}
+func (m *EngineReplicaListResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_EngineReplicaListResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_EngineReplicaListResponse proto.InternalMessageInfo
+
+func (m *EngineReplicaListResponse) GetReplicas() map[string]*Replica {
+	if m != nil {
+		return m.Replicas
+	}
+	return nil
+}
+
 type EngineReplicaDeleteRequest struct {
 	EngineName           string   `protobuf:"bytes,1,opt,name=engine_name,json=engineName,proto3" json:"engine_name,omitempty"`
 	ReplicaName          string   `protobuf:"bytes,2,opt,name=replica_name,json=replicaName,proto3" json:"replica_name,omitempty"`
@@ -1128,7 +1214,7 @@ func (m *EngineReplicaDeleteRequest) Reset()         { *m = EngineReplicaDeleteR
 func (m *EngineReplicaDeleteRequest) String() string { return proto.CompactTextString(m) }
 func (*EngineReplicaDeleteRequest) ProtoMessage()    {}
 func (*EngineReplicaDeleteRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{18}
+	return fileDescriptor_85fe8351d4b2427a, []int{20}
 }
 
 func (m *EngineReplicaDeleteRequest) XXX_Unmarshal(b []byte) error {
@@ -1182,7 +1268,7 @@ func (m *SnapshotRequest) Reset()         { *m = SnapshotRequest{} }
 func (m *SnapshotRequest) String() string { return proto.CompactTextString(m) }
 func (*SnapshotRequest) ProtoMessage()    {}
 func (*SnapshotRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{19}
+	return fileDescriptor_85fe8351d4b2427a, []int{21}
 }
 
 func (m *SnapshotRequest) XXX_Unmarshal(b []byte) error {
@@ -1236,7 +1322,7 @@ func (m *VersionOutput) Reset()         { *m = VersionOutput{} }
 func (m *VersionOutput) String() string { return proto.CompactTextString(m) }
 func (*VersionOutput) ProtoMessage()    {}
 func (*VersionOutput) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{20}
+	return fileDescriptor_85fe8351d4b2427a, []int{22}
 }
 
 func (m *VersionOutput) XXX_Unmarshal(b []byte) error {
@@ -1331,7 +1417,7 @@ func (m *VersionDetailGetReply) Reset()         { *m = VersionDetailGetReply{} }
 func (m *VersionDetailGetReply) String() string { return proto.CompactTextString(m) }
 func (*VersionDetailGetReply) ProtoMessage()    {}
 func (*VersionDetailGetReply) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{21}
+	return fileDescriptor_85fe8351d4b2427a, []int{23}
 }
 
 func (m *VersionDetailGetReply) XXX_Unmarshal(b []byte) error {
@@ -1359,6 +1445,786 @@ func (m *VersionDetailGetReply) GetVersion() *VersionOutput {
 	return nil
 }
 
+type BackupCreateRequest struct {
+	SnapshotName         string            `protobuf:"bytes,1,opt,name=snapshot_name,json=snapshotName,proto3" json:"snapshot_name,omitempty"`
+	BackupTarget         string            `protobuf:"bytes,2,opt,name=backup_target,json=backupTarget,proto3" json:"backup_target,omitempty"`
+	VolumeName           string            `protobuf:"bytes,3,opt,name=volume_name,json=volumeName,proto3" json:"volume_name,omitempty"`
+	Size                 int64             `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	EngineName           string            `protobuf:"bytes,5,opt,name=engine_name,json=engineName,proto3" json:"engine_name,omitempty"`
+	ReplicaName          string            `protobuf:"bytes,6,opt,name=replica_name,json=replicaName,proto3" json:"replica_name,omitempty"`
+	Labels               []string          `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty"`
+	Credential           map[string]string `protobuf:"bytes,8,rep,name=credential,proto3" json:"credential,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	BackingImageName     string            `protobuf:"bytes,9,opt,name=backing_image_name,json=backingImageName,proto3" json:"backing_image_name,omitempty"`
+	BackingImageChecksum string            `protobuf:"bytes,10,opt,name=backing_image_checksum,json=backingImageChecksum,proto3" json:"backing_image_checksum,omitempty"`
+	BackupName           string            `protobuf:"bytes,11,opt,name=backup_name,json=backupName,proto3" json:"backup_name,omitempty"`
+	CompressionMethod    string            `protobuf:"bytes,12,opt,name=compression_method,json=compressionMethod,proto3" json:"compression_method,omitempty"`
+	ConcurrentLimit      int32             `protobuf:"varint,13,opt,name=concurrent_limit,json=concurrentLimit,proto3" json:"concurrent_limit,omitempty"`
+	StorageClassName     string            `protobuf:"bytes,14,opt,name=storage_class_name,json=storageClassName,proto3" json:"storage_class_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
+}
+
+func (m *BackupCreateRequest) Reset()         { *m = BackupCreateRequest{} }
+func (m *BackupCreateRequest) String() string { return proto.CompactTextString(m) }
+func (*BackupCreateRequest) ProtoMessage()    {}
+func (*BackupCreateRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{24}
+}
+
+func (m *BackupCreateRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_BackupCreateRequest.Unmarshal(m, b)
+}
+func (m *BackupCreateRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_BackupCreateRequest.Marshal(b, m, deterministic)
+}
+func (m *BackupCreateRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_BackupCreateRequest.Merge(m, src)
+}
+func (m *BackupCreateRequest) XXX_Size() int {
+	return xxx_messageInfo_BackupCreateRequest.Size(m)
+}
+func (m *BackupCreateRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_BackupCreateRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_BackupCreateRequest proto.InternalMessageInfo
+
+func (m *BackupCreateRequest) GetSnapshotName() string {
+	if m != nil {
+		return m.SnapshotName
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetBackupTarget() string {
+	if m != nil {
+		return m.BackupTarget
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetVolumeName() string {
+	if m != nil {
+		return m.VolumeName
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetSize() int64 {
+	if m != nil {
+		return m.Size
+	}
+	return 0
+}
+
+func (m *BackupCreateRequest) GetEngineName() string {
+	if m != nil {
+		return m.EngineName
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetReplicaName() string {
+	if m != nil {
+		return m.ReplicaName
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetLabels() []string {
+	if m != nil {
+		return m.Labels
+	}
+	return nil
+}
+
+func (m *BackupCreateRequest) GetCredential() map[string]string {
+	if m != nil {
+		return m.Credential
+	}
+	return nil
+}
+
+func (m *BackupCreateRequest) GetBackingImageName() string {
+	if m != nil {
+		return m.BackingImageName
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetBackingImageChecksum() string {
+	if m != nil {
+		return m.BackingImageChecksum
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetBackupName() string {
+	if m != nil {
+		return m.BackupName
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetCompressionMethod() string {
+	if m != nil {
+		return m.CompressionMethod
+	}
+	return ""
+}
+
+func (m *BackupCreateRequest) GetConcurrentLimit() int32 {
+	if m != nil {
+		return m.ConcurrentLimit
+	}
+	return 0
+}
+
+func (m *BackupCreateRequest) GetStorageClassName() string {
+	if m != nil {
+		return m.StorageClassName
+	}
+	return ""
+}
+
+type BackupCreateResponse struct {
+	Backup               string   `protobuf:"bytes,1,opt,name=backup,proto3" json:"backup,omitempty"`
+	IsIncremental        bool     `protobuf:"varint,2,opt,name=is_incremental,json=isIncremental,proto3" json:"is_incremental,omitempty"`
+	ReplicaAddress       string   `protobuf:"bytes,3,opt,name=replica_address,json=replicaAddress,proto3" json:"replica_address,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *BackupCreateResponse) Reset()         { *m = BackupCreateResponse{} }
+func (m *BackupCreateResponse) String() string { return proto.CompactTextString(m) }
+func (*BackupCreateResponse) ProtoMessage()    {}
+func (*BackupCreateResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{25}
+}
+
+func (m *BackupCreateResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_BackupCreateResponse.Unmarshal(m, b)
+}
+func (m *BackupCreateResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_BackupCreateResponse.Marshal(b, m, deterministic)
+}
+func (m *BackupCreateResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_BackupCreateResponse.Merge(m, src)
+}
+func (m *BackupCreateResponse) XXX_Size() int {
+	return xxx_messageInfo_BackupCreateResponse.Size(m)
+}
+func (m *BackupCreateResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_BackupCreateResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_BackupCreateResponse proto.InternalMessageInfo
+
+func (m *BackupCreateResponse) GetBackup() string {
+	if m != nil {
+		return m.Backup
+	}
+	return ""
+}
+
+func (m *BackupCreateResponse) GetIsIncremental() bool {
+	if m != nil {
+		return m.IsIncremental
+	}
+	return false
+}
+
+func (m *BackupCreateResponse) GetReplicaAddress() string {
+	if m != nil {
+		return m.ReplicaAddress
+	}
+	return ""
+}
+
+type BackupStatusRequest struct {
+	Backup               string   `protobuf:"bytes,1,opt,name=backup,proto3" json:"backup,omitempty"`
+	EngineName           string   `protobuf:"bytes,2,opt,name=engine_name,json=engineName,proto3" json:"engine_name,omitempty"`
+	ReplicaAddress       string   `protobuf:"bytes,3,opt,name=replica_address,json=replicaAddress,proto3" json:"replica_address,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *BackupStatusRequest) Reset()         { *m = BackupStatusRequest{} }
+func (m *BackupStatusRequest) String() string { return proto.CompactTextString(m) }
+func (*BackupStatusRequest) ProtoMessage()    {}
+func (*BackupStatusRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{26}
+}
+
+func (m *BackupStatusRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_BackupStatusRequest.Unmarshal(m, b)
+}
+func (m *BackupStatusRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_BackupStatusRequest.Marshal(b, m, deterministic)
+}
+func (m *BackupStatusRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_BackupStatusRequest.Merge(m, src)
+}
+func (m *BackupStatusRequest) XXX_Size() int {
+	return xxx_messageInfo_BackupStatusRequest.Size(m)
+}
+func (m *BackupStatusRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_BackupStatusRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_BackupStatusRequest proto.InternalMessageInfo
+
+func (m *BackupStatusRequest) GetBackup() string {
+	if m != nil {
+		return m.Backup
+	}
+	return ""
+}
+
+func (m *BackupStatusRequest) GetEngineName() string {
+	if m != nil {
+		return m.EngineName
+	}
+	return ""
+}
+
+func (m *BackupStatusRequest) GetReplicaAddress() string {
+	if m != nil {
+		return m.ReplicaAddress
+	}
+	return ""
+}
+
+type BackupStatusResponse struct {
+	Progress             int32    `protobuf:"varint,1,opt,name=progress,proto3" json:"progress,omitempty"`
+	BackupUrl            string   `protobuf:"bytes,2,opt,name=backup_url,json=backupUrl,proto3" json:"backup_url,omitempty"`
+	Error                string   `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	SnapshotName         string   `protobuf:"bytes,4,opt,name=snapshot_name,json=snapshotName,proto3" json:"snapshot_name,omitempty"`
+	State                string   `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
+	ReplicaAddress       string   `protobuf:"bytes,6,opt,name=replica_address,json=replicaAddress,proto3" json:"replica_address,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *BackupStatusResponse) Reset()         { *m = BackupStatusResponse{} }
+func (m *BackupStatusResponse) String() string { return proto.CompactTextString(m) }
+func (*BackupStatusResponse) ProtoMessage()    {}
+func (*BackupStatusResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{27}
+}
+
+func (m *BackupStatusResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_BackupStatusResponse.Unmarshal(m, b)
+}
+func (m *BackupStatusResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_BackupStatusResponse.Marshal(b, m, deterministic)
+}
+func (m *BackupStatusResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_BackupStatusResponse.Merge(m, src)
+}
+func (m *BackupStatusResponse) XXX_Size() int {
+	return xxx_messageInfo_BackupStatusResponse.Size(m)
+}
+func (m *BackupStatusResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_BackupStatusResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_BackupStatusResponse proto.InternalMessageInfo
+
+func (m *BackupStatusResponse) GetProgress() int32 {
+	if m != nil {
+		return m.Progress
+	}
+	return 0
+}
+
+func (m *BackupStatusResponse) GetBackupUrl() string {
+	if m != nil {
+		return m.BackupUrl
+	}
+	return ""
+}
+
+func (m *BackupStatusResponse) GetError() string {
+	if m != nil {
+		return m.Error
+	}
+	return ""
+}
+
+func (m *BackupStatusResponse) GetSnapshotName() string {
+	if m != nil {
+		return m.SnapshotName
+	}
+	return ""
+}
+
+func (m *BackupStatusResponse) GetState() string {
+	if m != nil {
+		return m.State
+	}
+	return ""
+}
+
+func (m *BackupStatusResponse) GetReplicaAddress() string {
+	if m != nil {
+		return m.ReplicaAddress
+	}
+	return ""
+}
+
+type EngineBackupRestoreRequest struct {
+	BackupUrl            string            `protobuf:"bytes,1,opt,name=backup_url,json=backupUrl,proto3" json:"backup_url,omitempty"`
+	EngineName           string            `protobuf:"bytes,2,opt,name=engine_name,json=engineName,proto3" json:"engine_name,omitempty"`
+	SnapshotName         string            `protobuf:"bytes,3,opt,name=snapshot_name,json=snapshotName,proto3" json:"snapshot_name,omitempty"`
+	Credential           map[string]string `protobuf:"bytes,4,rep,name=credential,proto3" json:"credential,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	ConcurrentLimit      int32             `protobuf:"varint,5,opt,name=concurrent_limit,json=concurrentLimit,proto3" json:"concurrent_limit,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
+}
+
+func (m *EngineBackupRestoreRequest) Reset()         { *m = EngineBackupRestoreRequest{} }
+func (m *EngineBackupRestoreRequest) String() string { return proto.CompactTextString(m) }
+func (*EngineBackupRestoreRequest) ProtoMessage()    {}
+func (*EngineBackupRestoreRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{28}
+}
+
+func (m *EngineBackupRestoreRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_EngineBackupRestoreRequest.Unmarshal(m, b)
+}
+func (m *EngineBackupRestoreRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_EngineBackupRestoreRequest.Marshal(b, m, deterministic)
+}
+func (m *EngineBackupRestoreRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_EngineBackupRestoreRequest.Merge(m, src)
+}
+func (m *EngineBackupRestoreRequest) XXX_Size() int {
+	return xxx_messageInfo_EngineBackupRestoreRequest.Size(m)
+}
+func (m *EngineBackupRestoreRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_EngineBackupRestoreRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_EngineBackupRestoreRequest proto.InternalMessageInfo
+
+func (m *EngineBackupRestoreRequest) GetBackupUrl() string {
+	if m != nil {
+		return m.BackupUrl
+	}
+	return ""
+}
+
+func (m *EngineBackupRestoreRequest) GetEngineName() string {
+	if m != nil {
+		return m.EngineName
+	}
+	return ""
+}
+
+func (m *EngineBackupRestoreRequest) GetSnapshotName() string {
+	if m != nil {
+		return m.SnapshotName
+	}
+	return ""
+}
+
+func (m *EngineBackupRestoreRequest) GetCredential() map[string]string {
+	if m != nil {
+		return m.Credential
+	}
+	return nil
+}
+
+func (m *EngineBackupRestoreRequest) GetConcurrentLimit() int32 {
+	if m != nil {
+		return m.ConcurrentLimit
+	}
+	return 0
+}
+
+type EngineBackupRestoreResponse struct {
+	Errors               map[string]string `protobuf:"bytes,4,rep,name=errors,proto3" json:"errors,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
+}
+
+func (m *EngineBackupRestoreResponse) Reset()         { *m = EngineBackupRestoreResponse{} }
+func (m *EngineBackupRestoreResponse) String() string { return proto.CompactTextString(m) }
+func (*EngineBackupRestoreResponse) ProtoMessage()    {}
+func (*EngineBackupRestoreResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{29}
+}
+
+func (m *EngineBackupRestoreResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_EngineBackupRestoreResponse.Unmarshal(m, b)
+}
+func (m *EngineBackupRestoreResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_EngineBackupRestoreResponse.Marshal(b, m, deterministic)
+}
+func (m *EngineBackupRestoreResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_EngineBackupRestoreResponse.Merge(m, src)
+}
+func (m *EngineBackupRestoreResponse) XXX_Size() int {
+	return xxx_messageInfo_EngineBackupRestoreResponse.Size(m)
+}
+func (m *EngineBackupRestoreResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_EngineBackupRestoreResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_EngineBackupRestoreResponse proto.InternalMessageInfo
+
+func (m *EngineBackupRestoreResponse) GetErrors() map[string]string {
+	if m != nil {
+		return m.Errors
+	}
+	return nil
+}
+
+type EngineBackupRestoreFinishRequest struct {
+	EngineName           string   `protobuf:"bytes,1,opt,name=engine_name,json=engineName,proto3" json:"engine_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *EngineBackupRestoreFinishRequest) Reset()         { *m = EngineBackupRestoreFinishRequest{} }
+func (m *EngineBackupRestoreFinishRequest) String() string { return proto.CompactTextString(m) }
+func (*EngineBackupRestoreFinishRequest) ProtoMessage()    {}
+func (*EngineBackupRestoreFinishRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{30}
+}
+
+func (m *EngineBackupRestoreFinishRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_EngineBackupRestoreFinishRequest.Unmarshal(m, b)
+}
+func (m *EngineBackupRestoreFinishRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_EngineBackupRestoreFinishRequest.Marshal(b, m, deterministic)
+}
+func (m *EngineBackupRestoreFinishRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_EngineBackupRestoreFinishRequest.Merge(m, src)
+}
+func (m *EngineBackupRestoreFinishRequest) XXX_Size() int {
+	return xxx_messageInfo_EngineBackupRestoreFinishRequest.Size(m)
+}
+func (m *EngineBackupRestoreFinishRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_EngineBackupRestoreFinishRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_EngineBackupRestoreFinishRequest proto.InternalMessageInfo
+
+func (m *EngineBackupRestoreFinishRequest) GetEngineName() string {
+	if m != nil {
+		return m.EngineName
+	}
+	return ""
+}
+
+type ReplicaBackupRestoreRequest struct {
+	BackupUrl            string            `protobuf:"bytes,1,opt,name=backup_url,json=backupUrl,proto3" json:"backup_url,omitempty"`
+	ReplicaName          string            `protobuf:"bytes,2,opt,name=replica_name,json=replicaName,proto3" json:"replica_name,omitempty"`
+	SnapshotName         string            `protobuf:"bytes,3,opt,name=snapshot_name,json=snapshotName,proto3" json:"snapshot_name,omitempty"`
+	Credential           map[string]string `protobuf:"bytes,4,rep,name=credential,proto3" json:"credential,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	ConcurrentLimit      int32             `protobuf:"varint,5,opt,name=concurrent_limit,json=concurrentLimit,proto3" json:"concurrent_limit,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
+}
+
+func (m *ReplicaBackupRestoreRequest) Reset()         { *m = ReplicaBackupRestoreRequest{} }
+func (m *ReplicaBackupRestoreRequest) String() string { return proto.CompactTextString(m) }
+func (*ReplicaBackupRestoreRequest) ProtoMessage()    {}
+func (*ReplicaBackupRestoreRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{31}
+}
+
+func (m *ReplicaBackupRestoreRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ReplicaBackupRestoreRequest.Unmarshal(m, b)
+}
+func (m *ReplicaBackupRestoreRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ReplicaBackupRestoreRequest.Marshal(b, m, deterministic)
+}
+func (m *ReplicaBackupRestoreRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReplicaBackupRestoreRequest.Merge(m, src)
+}
+func (m *ReplicaBackupRestoreRequest) XXX_Size() int {
+	return xxx_messageInfo_ReplicaBackupRestoreRequest.Size(m)
+}
+func (m *ReplicaBackupRestoreRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ReplicaBackupRestoreRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ReplicaBackupRestoreRequest proto.InternalMessageInfo
+
+func (m *ReplicaBackupRestoreRequest) GetBackupUrl() string {
+	if m != nil {
+		return m.BackupUrl
+	}
+	return ""
+}
+
+func (m *ReplicaBackupRestoreRequest) GetReplicaName() string {
+	if m != nil {
+		return m.ReplicaName
+	}
+	return ""
+}
+
+func (m *ReplicaBackupRestoreRequest) GetSnapshotName() string {
+	if m != nil {
+		return m.SnapshotName
+	}
+	return ""
+}
+
+func (m *ReplicaBackupRestoreRequest) GetCredential() map[string]string {
+	if m != nil {
+		return m.Credential
+	}
+	return nil
+}
+
+func (m *ReplicaBackupRestoreRequest) GetConcurrentLimit() int32 {
+	if m != nil {
+		return m.ConcurrentLimit
+	}
+	return 0
+}
+
+type RestoreStatusRequest struct {
+	EngineName           string   `protobuf:"bytes,1,opt,name=engine_name,json=engineName,proto3" json:"engine_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *RestoreStatusRequest) Reset()         { *m = RestoreStatusRequest{} }
+func (m *RestoreStatusRequest) String() string { return proto.CompactTextString(m) }
+func (*RestoreStatusRequest) ProtoMessage()    {}
+func (*RestoreStatusRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{32}
+}
+
+func (m *RestoreStatusRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_RestoreStatusRequest.Unmarshal(m, b)
+}
+func (m *RestoreStatusRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_RestoreStatusRequest.Marshal(b, m, deterministic)
+}
+func (m *RestoreStatusRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_RestoreStatusRequest.Merge(m, src)
+}
+func (m *RestoreStatusRequest) XXX_Size() int {
+	return xxx_messageInfo_RestoreStatusRequest.Size(m)
+}
+func (m *RestoreStatusRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_RestoreStatusRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_RestoreStatusRequest proto.InternalMessageInfo
+
+func (m *RestoreStatusRequest) GetEngineName() string {
+	if m != nil {
+		return m.EngineName
+	}
+	return ""
+}
+
+type ReplicaRestoreStatusRequest struct {
+	ReplicaName          string   `protobuf:"bytes,2,opt,name=replica_name,json=replicaName,proto3" json:"replica_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *ReplicaRestoreStatusRequest) Reset()         { *m = ReplicaRestoreStatusRequest{} }
+func (m *ReplicaRestoreStatusRequest) String() string { return proto.CompactTextString(m) }
+func (*ReplicaRestoreStatusRequest) ProtoMessage()    {}
+func (*ReplicaRestoreStatusRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{33}
+}
+
+func (m *ReplicaRestoreStatusRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ReplicaRestoreStatusRequest.Unmarshal(m, b)
+}
+func (m *ReplicaRestoreStatusRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ReplicaRestoreStatusRequest.Marshal(b, m, deterministic)
+}
+func (m *ReplicaRestoreStatusRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReplicaRestoreStatusRequest.Merge(m, src)
+}
+func (m *ReplicaRestoreStatusRequest) XXX_Size() int {
+	return xxx_messageInfo_ReplicaRestoreStatusRequest.Size(m)
+}
+func (m *ReplicaRestoreStatusRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ReplicaRestoreStatusRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ReplicaRestoreStatusRequest proto.InternalMessageInfo
+
+func (m *ReplicaRestoreStatusRequest) GetReplicaName() string {
+	if m != nil {
+		return m.ReplicaName
+	}
+	return ""
+}
+
+type ReplicaRestoreStatusResponse struct {
+	ReplicaName            string   `protobuf:"bytes,1,opt,name=replica_name,json=replicaName,proto3" json:"replica_name,omitempty"`
+	ReplicaAddress         string   `protobuf:"bytes,2,opt,name=replica_address,json=replicaAddress,proto3" json:"replica_address,omitempty"`
+	IsRestoring            bool     `protobuf:"varint,3,opt,name=is_restoring,json=isRestoring,proto3" json:"is_restoring,omitempty"`
+	LastRestored           string   `protobuf:"bytes,4,opt,name=last_restored,json=lastRestored,proto3" json:"last_restored,omitempty"`
+	Progress               int32    `protobuf:"varint,5,opt,name=progress,proto3" json:"progress,omitempty"`
+	Error                  string   `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	DestFileName           string   `protobuf:"bytes,7,opt,name=dest_file_name,json=destFileName,proto3" json:"dest_file_name,omitempty"`
+	State                  string   `protobuf:"bytes,8,opt,name=state,proto3" json:"state,omitempty"`
+	BackupUrl              string   `protobuf:"bytes,9,opt,name=backup_url,json=backupUrl,proto3" json:"backup_url,omitempty"`
+	CurrentRestoringBackup string   `protobuf:"bytes,10,opt,name=current_restoring_backup,json=currentRestoringBackup,proto3" json:"current_restoring_backup,omitempty"`
+	XXX_NoUnkeyedLiteral   struct{} `json:"-"`
+	XXX_unrecognized       []byte   `json:"-"`
+	XXX_sizecache          int32    `json:"-"`
+}
+
+func (m *ReplicaRestoreStatusResponse) Reset()         { *m = ReplicaRestoreStatusResponse{} }
+func (m *ReplicaRestoreStatusResponse) String() string { return proto.CompactTextString(m) }
+func (*ReplicaRestoreStatusResponse) ProtoMessage()    {}
+func (*ReplicaRestoreStatusResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{34}
+}
+
+func (m *ReplicaRestoreStatusResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ReplicaRestoreStatusResponse.Unmarshal(m, b)
+}
+func (m *ReplicaRestoreStatusResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ReplicaRestoreStatusResponse.Marshal(b, m, deterministic)
+}
+func (m *ReplicaRestoreStatusResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReplicaRestoreStatusResponse.Merge(m, src)
+}
+func (m *ReplicaRestoreStatusResponse) XXX_Size() int {
+	return xxx_messageInfo_ReplicaRestoreStatusResponse.Size(m)
+}
+func (m *ReplicaRestoreStatusResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ReplicaRestoreStatusResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ReplicaRestoreStatusResponse proto.InternalMessageInfo
+
+func (m *ReplicaRestoreStatusResponse) GetReplicaName() string {
+	if m != nil {
+		return m.ReplicaName
+	}
+	return ""
+}
+
+func (m *ReplicaRestoreStatusResponse) GetReplicaAddress() string {
+	if m != nil {
+		return m.ReplicaAddress
+	}
+	return ""
+}
+
+func (m *ReplicaRestoreStatusResponse) GetIsRestoring() bool {
+	if m != nil {
+		return m.IsRestoring
+	}
+	return false
+}
+
+func (m *ReplicaRestoreStatusResponse) GetLastRestored() string {
+	if m != nil {
+		return m.LastRestored
+	}
+	return ""
+}
+
+func (m *ReplicaRestoreStatusResponse) GetProgress() int32 {
+	if m != nil {
+		return m.Progress
+	}
+	return 0
+}
+
+func (m *ReplicaRestoreStatusResponse) GetError() string {
+	if m != nil {
+		return m.Error
+	}
+	return ""
+}
+
+func (m *ReplicaRestoreStatusResponse) GetDestFileName() string {
+	if m != nil {
+		return m.DestFileName
+	}
+	return ""
+}
+
+func (m *ReplicaRestoreStatusResponse) GetState() string {
+	if m != nil {
+		return m.State
+	}
+	return ""
+}
+
+func (m *ReplicaRestoreStatusResponse) GetBackupUrl() string {
+	if m != nil {
+		return m.BackupUrl
+	}
+	return ""
+}
+
+func (m *ReplicaRestoreStatusResponse) GetCurrentRestoringBackup() string {
+	if m != nil {
+		return m.CurrentRestoringBackup
+	}
+	return ""
+}
+
+type RestoreStatusResponse struct {
+	Status               map[string]*ReplicaRestoreStatusResponse `protobuf:"bytes,1,rep,name=status,proto3" json:"status,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	XXX_NoUnkeyedLiteral struct{}                                 `json:"-"`
+	XXX_unrecognized     []byte                                   `json:"-"`
+	XXX_sizecache        int32                                    `json:"-"`
+}
+
+func (m *RestoreStatusResponse) Reset()         { *m = RestoreStatusResponse{} }
+func (m *RestoreStatusResponse) String() string { return proto.CompactTextString(m) }
+func (*RestoreStatusResponse) ProtoMessage()    {}
+func (*RestoreStatusResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_85fe8351d4b2427a, []int{35}
+}
+
+func (m *RestoreStatusResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_RestoreStatusResponse.Unmarshal(m, b)
+}
+func (m *RestoreStatusResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_RestoreStatusResponse.Marshal(b, m, deterministic)
+}
+func (m *RestoreStatusResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_RestoreStatusResponse.Merge(m, src)
+}
+func (m *RestoreStatusResponse) XXX_Size() int {
+	return xxx_messageInfo_RestoreStatusResponse.Size(m)
+}
+func (m *RestoreStatusResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_RestoreStatusResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_RestoreStatusResponse proto.InternalMessageInfo
+
+func (m *RestoreStatusResponse) GetStatus() map[string]*ReplicaRestoreStatusResponse {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
 type Disk struct {
 	Id                   string   `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Uuid                 string   `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
@@ -1379,7 +2245,7 @@ func (m *Disk) Reset()         { *m = Disk{} }
 func (m *Disk) String() string { return proto.CompactTextString(m) }
 func (*Disk) ProtoMessage()    {}
 func (*Disk) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{22}
+	return fileDescriptor_85fe8351d4b2427a, []int{36}
 }
 
 func (m *Disk) XXX_Unmarshal(b []byte) error {
@@ -1484,7 +2350,7 @@ func (m *DiskCreateRequest) Reset()         { *m = DiskCreateRequest{} }
 func (m *DiskCreateRequest) String() string { return proto.CompactTextString(m) }
 func (*DiskCreateRequest) ProtoMessage()    {}
 func (*DiskCreateRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{23}
+	return fileDescriptor_85fe8351d4b2427a, []int{37}
 }
 
 func (m *DiskCreateRequest) XXX_Unmarshal(b []byte) error {
@@ -1544,7 +2410,7 @@ func (m *DiskGetRequest) Reset()         { *m = DiskGetRequest{} }
 func (m *DiskGetRequest) String() string { return proto.CompactTextString(m) }
 func (*DiskGetRequest) ProtoMessage()    {}
 func (*DiskGetRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{24}
+	return fileDescriptor_85fe8351d4b2427a, []int{38}
 }
 
 func (m *DiskGetRequest) XXX_Unmarshal(b []byte) error {
@@ -1584,7 +2450,7 @@ func (m *DiskDeleteRequest) Reset()         { *m = DiskDeleteRequest{} }
 func (m *DiskDeleteRequest) String() string { return proto.CompactTextString(m) }
 func (*DiskDeleteRequest) ProtoMessage()    {}
 func (*DiskDeleteRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_85fe8351d4b2427a, []int{25}
+	return fileDescriptor_85fe8351d4b2427a, []int{39}
 }
 
 func (m *DiskDeleteRequest) XXX_Unmarshal(b []byte) error {
@@ -1646,10 +2512,30 @@ func init() {
 	proto.RegisterType((*EngineListResponse)(nil), "spdkrpc.EngineListResponse")
 	proto.RegisterMapType((map[string]*Engine)(nil), "spdkrpc.EngineListResponse.EnginesEntry")
 	proto.RegisterType((*EngineReplicaAddRequest)(nil), "spdkrpc.EngineReplicaAddRequest")
+	proto.RegisterType((*EngineReplicaListRequest)(nil), "spdkrpc.EngineReplicaListRequest")
+	proto.RegisterType((*EngineReplicaListResponse)(nil), "spdkrpc.EngineReplicaListResponse")
+	proto.RegisterMapType((map[string]*Replica)(nil), "spdkrpc.EngineReplicaListResponse.ReplicasEntry")
 	proto.RegisterType((*EngineReplicaDeleteRequest)(nil), "spdkrpc.EngineReplicaDeleteRequest")
 	proto.RegisterType((*SnapshotRequest)(nil), "spdkrpc.SnapshotRequest")
 	proto.RegisterType((*VersionOutput)(nil), "spdkrpc.VersionOutput")
 	proto.RegisterType((*VersionDetailGetReply)(nil), "spdkrpc.VersionDetailGetReply")
+	proto.RegisterType((*BackupCreateRequest)(nil), "spdkrpc.BackupCreateRequest")
+	proto.RegisterMapType((map[string]string)(nil), "spdkrpc.BackupCreateRequest.CredentialEntry")
+	proto.RegisterType((*BackupCreateResponse)(nil), "spdkrpc.BackupCreateResponse")
+	proto.RegisterType((*BackupStatusRequest)(nil), "spdkrpc.BackupStatusRequest")
+	proto.RegisterType((*BackupStatusResponse)(nil), "spdkrpc.BackupStatusResponse")
+	proto.RegisterType((*EngineBackupRestoreRequest)(nil), "spdkrpc.EngineBackupRestoreRequest")
+	proto.RegisterMapType((map[string]string)(nil), "spdkrpc.EngineBackupRestoreRequest.CredentialEntry")
+	proto.RegisterType((*EngineBackupRestoreResponse)(nil), "spdkrpc.EngineBackupRestoreResponse")
+	proto.RegisterMapType((map[string]string)(nil), "spdkrpc.EngineBackupRestoreResponse.ErrorsEntry")
+	proto.RegisterType((*EngineBackupRestoreFinishRequest)(nil), "spdkrpc.EngineBackupRestoreFinishRequest")
+	proto.RegisterType((*ReplicaBackupRestoreRequest)(nil), "spdkrpc.ReplicaBackupRestoreRequest")
+	proto.RegisterMapType((map[string]string)(nil), "spdkrpc.ReplicaBackupRestoreRequest.CredentialEntry")
+	proto.RegisterType((*RestoreStatusRequest)(nil), "spdkrpc.RestoreStatusRequest")
+	proto.RegisterType((*ReplicaRestoreStatusRequest)(nil), "spdkrpc.ReplicaRestoreStatusRequest")
+	proto.RegisterType((*ReplicaRestoreStatusResponse)(nil), "spdkrpc.ReplicaRestoreStatusResponse")
+	proto.RegisterType((*RestoreStatusResponse)(nil), "spdkrpc.RestoreStatusResponse")
+	proto.RegisterMapType((map[string]*ReplicaRestoreStatusResponse)(nil), "spdkrpc.RestoreStatusResponse.StatusEntry")
 	proto.RegisterType((*Disk)(nil), "spdkrpc.Disk")
 	proto.RegisterType((*DiskCreateRequest)(nil), "spdkrpc.DiskCreateRequest")
 	proto.RegisterType((*DiskGetRequest)(nil), "spdkrpc.DiskGetRequest")
@@ -1661,120 +2547,172 @@ func init() {
 }
 
 var fileDescriptor_85fe8351d4b2427a = []byte{
-	// 1801 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xbc, 0x58, 0xcd, 0x72, 0xdb, 0xc8,
-	0x11, 0x36, 0x7f, 0x24, 0x92, 0x4d, 0x89, 0xa2, 0xc6, 0xb2, 0x0c, 0x43, 0xb6, 0x25, 0x43, 0x89,
-	0x2c, 0x2b, 0x31, 0xe5, 0xc8, 0x07, 0x3b, 0x4e, 0xa9, 0xca, 0xb2, 0x28, 0x25, 0xfe, 0x91, 0xed,
-	0xa2, 0x62, 0xeb, 0x92, 0x2a, 0x1a, 0x02, 0xc6, 0x22, 0x4a, 0x20, 0x00, 0x03, 0x03, 0x26, 0xf2,
-	0x03, 0x24, 0x95, 0x7b, 0xee, 0x39, 0xe5, 0x96, 0x4b, 0x2a, 0x87, 0x7d, 0x82, 0x3d, 0xee, 0x0b,
-	0xed, 0x69, 0x6b, 0xfe, 0x40, 0x00, 0x04, 0x20, 0xae, 0xed, 0xda, 0x13, 0x07, 0x5f, 0xf7, 0x74,
-	0xf7, 0x74, 0xf7, 0x74, 0x4f, 0x13, 0x7e, 0x7f, 0x66, 0x91, 0x41, 0x78, 0xda, 0x31, 0xdc, 0xe1,
-	0xb6, 0xed, 0x3a, 0x67, 0x03, 0xd7, 0x77, 0xa2, 0xc5, 0xfd, 0xc0, 0x33, 0xcf, 0xef, 0x63, 0xe7,
-	0xcc, 0x72, 0xf0, 0xb6, 0xe7, 0xbb, 0xc4, 0xdd, 0xa6, 0x48, 0x87, 0x2d, 0x51, 0x8d, 0xae, 0x7d,
-	0xcf, 0x50, 0x57, 0xce, 0x5c, 0xf7, 0xcc, 0x16, 0x1c, 0xa7, 0xe1, 0xc7, 0x6d, 0x3c, 0xf4, 0xc8,
-	0x05, 0xe7, 0xd2, 0x7e, 0x2c, 0x41, 0xf5, 0xd5, 0xc8, 0xb5, 0x11, 0x82, 0xaa, 0xa3, 0x0f, 0xb1,
-	0x52, 0x5a, 0x2b, 0x6d, 0x36, 0x7a, 0x6c, 0x4d, 0xb1, 0x30, 0xb4, 0x4c, 0xa5, 0xcc, 0x31, 0xba,
-	0x46, 0x2b, 0xd0, 0x08, 0x3c, 0x6c, 0xf4, 0x03, 0xeb, 0x33, 0x56, 0x2a, 0x6b, 0xa5, 0xcd, 0x6a,
-	0xaf, 0x4e, 0x81, 0x63, 0xeb, 0x33, 0x46, 0xab, 0xd0, 0xd4, 0x0d, 0x12, 0xea, 0x36, 0x27, 0x57,
-	0x19, 0x19, 0x38, 0xc4, 0x18, 0x96, 0x61, 0xd6, 0xd3, 0x7d, 0xec, 0x10, 0x65, 0x86, 0xc9, 0x14,
-	0x5f, 0xe8, 0x11, 0xd4, 0x8d, 0x81, 0x65, 0x9b, 0x3e, 0x76, 0x94, 0xd9, 0xb5, 0xca, 0x66, 0x73,
-	0x67, 0xa5, 0x23, 0xec, 0xef, 0x50, 0xf3, 0x3a, 0xfb, 0x82, 0x7a, 0xe0, 0x10, 0xff, 0xa2, 0x17,
-	0x31, 0xab, 0x7f, 0x80, 0xf9, 0x04, 0x09, 0xb5, 0xa1, 0x72, 0x8e, 0x2f, 0xc4, 0x31, 0xe8, 0x12,
-	0x2d, 0xc1, 0xcc, 0x48, 0xb7, 0x43, 0xcc, 0x8e, 0x51, 0xef, 0xf1, 0x8f, 0x27, 0xe5, 0xc7, 0x25,
-	0xed, 0x7f, 0x15, 0xa8, 0xf5, 0xb0, 0x67, 0x5b, 0x86, 0x3e, 0xf5, 0xf9, 0x6f, 0x40, 0xdd, 0x1e,
-	0x05, 0x7d, 0xc6, 0x5b, 0x61, 0x78, 0xcd, 0x1e, 0x05, 0xaf, 0x29, 0xbb, 0x20, 0xb1, 0x2d, 0xd5,
-	0x88, 0xf4, 0x6e, 0xc2, 0x6b, 0x33, 0xc5, 0x5e, 0x9b, 0x9d, 0xf0, 0x5a, 0x0b, 0xca, 0x96, 0xa7,
-	0xd4, 0x98, 0xc8, 0xb2, 0xe5, 0xa1, 0x5b, 0x00, 0x9e, 0xeb, 0x93, 0x7e, 0x40, 0x74, 0x9f, 0x28,
-	0xf5, 0xb5, 0xd2, 0xe6, 0x4c, 0xaf, 0x41, 0x91, 0x63, 0x0a, 0x50, 0x3b, 0x18, 0x19, 0x3b, 0xa6,
-	0xd2, 0x60, 0xc4, 0x1a, 0xfd, 0x3e, 0x70, 0x4c, 0xb4, 0x0b, 0x8d, 0xc0, 0xd1, 0xbd, 0x60, 0xe0,
-	0x92, 0x40, 0x01, 0xe6, 0xe8, 0xd5, 0xc8, 0xd1, 0xc2, 0x15, 0x9d, 0x63, 0xc9, 0xc1, 0x9d, 0x3d,
-	0xde, 0x81, 0x6e, 0x03, 0xf8, 0xf8, 0x34, 0xb4, 0x6c, 0xd3, 0x72, 0xce, 0x94, 0x26, 0xf3, 0x67,
-	0x0c, 0xa1, 0xae, 0x0e, 0x88, 0x4e, 0xb0, 0x32, 0xc7, 0x6c, 0xe5, 0x1f, 0xea, 0x4b, 0x68, 0x25,
-	0x45, 0x66, 0x04, 0x69, 0x3d, 0x1e, 0xa4, 0xe6, 0xce, 0x7c, 0x22, 0xfa, 0xf1, 0x98, 0x7d, 0x5f,
-	0x82, 0x25, 0x61, 0xe8, 0xbe, 0x8f, 0x75, 0x82, 0x7b, 0xf8, 0x53, 0x88, 0x03, 0x92, 0x19, 0xc0,
-	0x78, 0xb0, 0xca, 0xf9, 0xc1, 0xaa, 0x14, 0x04, 0xab, 0x9a, 0x0a, 0xd6, 0x5d, 0x58, 0xc0, 0x7f,
-	0xf3, 0xdc, 0x00, 0xf7, 0x7d, 0xfc, 0x29, 0xb4, 0x7c, 0x6c, 0xb2, 0x78, 0xd6, 0x7b, 0x2d, 0x0e,
-	0xf7, 0x04, 0x1a, 0x05, 0xc9, 0x70, 0x43, 0x87, 0xb0, 0xa0, 0x8a, 0x20, 0xed, 0x53, 0x40, 0x7b,
-	0x17, 0x1d, 0xa3, 0x8b, 0x6d, 0x5c, 0x7c, 0x8c, 0x7b, 0xd0, 0x36, 0x6c, 0xac, 0x3b, 0xa1, 0x37,
-	0x56, 0xca, 0x93, 0x79, 0x41, 0xe0, 0x52, 0xab, 0x76, 0x17, 0x16, 0x85, 0xd8, 0x3f, 0x62, 0x52,
-	0x20, 0x53, 0xfb, 0x6f, 0x09, 0xae, 0x0a, 0xce, 0x57, 0x56, 0x40, 0x7a, 0x38, 0xf0, 0x5c, 0x27,
-	0xc0, 0xe8, 0x10, 0xea, 0x3e, 0x87, 0x03, 0xa5, 0xc4, 0x12, 0x64, 0x2b, 0x9d, 0x20, 0x71, 0x7e,
-	0x89, 0x89, 0x5c, 0x89, 0xf6, 0xaa, 0x47, 0x30, 0x9f, 0x20, 0x65, 0xc4, 0x7c, 0x23, 0x19, 0xf3,
-	0x76, 0x5a, 0x4f, 0x3c, 0xec, 0xff, 0x2e, 0xc1, 0x9a, 0x84, 0xa3, 0x7c, 0x3b, 0xf6, 0x0d, 0x96,
-	0xf1, 0x45, 0xbe, 0xdb, 0x84, 0xb6, 0x19, 0x90, 0xbe, 0xb0, 0x2b, 0x9e, 0x0a, 0x2d, 0x93, 0x1e,
-	0x83, 0xc1, 0x2c, 0x23, 0x76, 0x61, 0x85, 0x73, 0x4a, 0xf1, 0x7d, 0x7b, 0xe4, 0xda, 0x7d, 0xdd,
-	0x34, 0x7d, 0x1c, 0x04, 0x22, 0x49, 0x14, 0xb6, 0x49, 0x72, 0xd0, 0xe4, 0xdc, 0xe3, 0x74, 0x4d,
-	0x87, 0x3b, 0x59, 0x06, 0x1e, 0x5a, 0x8e, 0x15, 0x0c, 0xbe, 0x89, 0x85, 0xda, 0x5f, 0x22, 0x15,
-	0xf2, 0x3e, 0x1d, 0x0f, 0x74, 0xdb, 0x76, 0xff, 0xba, 0xef, 0x7a, 0x17, 0x45, 0x2a, 0xd6, 0x61,
-	0x5e, 0x5e, 0xe2, 0xb8, 0xfc, 0x39, 0x09, 0x32, 0xe9, 0xfd, 0x0c, 0x0f, 0x77, 0x03, 0x72, 0xa9,
-	0x87, 0x33, 0x6e, 0x44, 0x39, 0xeb, 0x46, 0x68, 0xbb, 0x19, 0x1e, 0x1a, 0x2b, 0x10, 0xf9, 0xa7,
-	0x40, 0x4d, 0x7a, 0x9c, 0x2b, 0x91, 0x9f, 0x9a, 0x99, 0xbd, 0xfd, 0x72, 0x07, 0xff, 0x06, 0x16,
-	0x43, 0x27, 0xdb, 0xc4, 0xb6, 0x24, 0x44, 0x46, 0xfe, 0xbf, 0x0a, 0xb3, 0x07, 0xac, 0xa5, 0x66,
-	0xca, 0x5a, 0x85, 0xe6, 0xc8, 0xb5, 0xc3, 0x21, 0x8e, 0xfb, 0x11, 0x38, 0xc4, 0xb2, 0xe8, 0xeb,
-	0xfa, 0x23, 0xaf, 0xf4, 0x33, 0x51, 0xa5, 0x47, 0x50, 0xa5, 0x25, 0x43, 0x94, 0x0f, 0xb6, 0x46,
-	0xef, 0xe1, 0xaa, 0xcc, 0x15, 0xe1, 0x9a, 0xfe, 0x50, 0xa7, 0xed, 0x81, 0x5e, 0xd6, 0x8d, 0xe8,
-	0x12, 0xf1, 0x43, 0xc8, 0xbb, 0x24, 0xb2, 0xf4, 0x48, 0xf7, 0xf8, 0x45, 0x5d, 0xf4, 0xd3, 0x38,
-	0x3a, 0x82, 0xb6, 0x94, 0x3b, 0x74, 0x4d, 0xcc, 0x84, 0xd6, 0x99, 0xd0, 0xf5, 0x1c, 0xa1, 0x47,
-	0xae, 0x89, 0x23, 0x89, 0x2d, 0x3f, 0x01, 0x22, 0x15, 0xea, 0x1f, 0x7d, 0xd7, 0x21, 0xb2, 0x0b,
-	0x35, 0x7a, 0xd1, 0x37, 0xa5, 0x61, 0xc7, 0xf4, 0x5c, 0xcb, 0x21, 0x0a, 0x70, 0x9a, 0xfc, 0x1e,
-	0xf7, 0x90, 0x66, 0xbc, 0x87, 0x74, 0x61, 0x39, 0xfb, 0x24, 0x97, 0x35, 0xfc, 0x46, 0xac, 0x8a,
-	0xa8, 0x27, 0x51, 0xcd, 0x8b, 0x9b, 0x9e, 0x21, 0x62, 0x2b, 0x2e, 0xa2, 0xb5, 0xb3, 0x94, 0x2e,
-	0x4d, 0x74, 0x7b, 0xbc, 0x3c, 0xfd, 0x50, 0x86, 0xab, 0xdc, 0x37, 0x97, 0x37, 0xa5, 0xaf, 0x4b,
-	0x21, 0x23, 0x3b, 0xfa, 0x55, 0x16, 0xa8, 0x87, 0xa9, 0x40, 0x25, 0x8c, 0xf9, 0x19, 0xa9, 0x10,
-	0x8f, 0xdd, 0x4c, 0x2a, 0x76, 0xc5, 0x7d, 0xed, 0xdb, 0x04, 0x4a, 0xbb, 0x27, 0xdd, 0x79, 0x69,
-	0x73, 0xd4, 0x36, 0xa0, 0xcd, 0x59, 0x2f, 0x69, 0x78, 0xff, 0x29, 0x01, 0xe2, 0x8c, 0x89, 0x7e,
-	0xf7, 0x0c, 0x6a, 0xfc, 0x05, 0x2d, 0xdb, 0xdd, 0x66, 0xca, 0x87, 0x89, 0x6e, 0xc7, 0x21, 0xd1,
-	0xec, 0xe4, 0x46, 0xf5, 0x25, 0xcc, 0xc5, 0x09, 0x19, 0x27, 0xfd, 0x75, 0xb2, 0xd5, 0x2d, 0xa4,
-	0x74, 0xc4, 0x8f, 0xfe, 0xf7, 0x12, 0x5c, 0x17, 0x68, 0xe4, 0x47, 0x79, 0xae, 0x55, 0x68, 0x72,
-	0x9d, 0xfd, 0xd8, 0xf1, 0x80, 0x43, 0x2c, 0x75, 0xee, 0xc0, 0x5c, 0x46, 0x1f, 0x69, 0xfa, 0xb1,
-	0x36, 0x77, 0x17, 0x16, 0x52, 0x09, 0x24, 0x5a, 0x5b, 0x2b, 0x99, 0x07, 0xda, 0x3f, 0x4b, 0xa0,
-	0x26, 0x0c, 0x49, 0xc6, 0xe2, 0x17, 0xb5, 0xe5, 0x05, 0x2c, 0xc8, 0x96, 0xf7, 0xd5, 0x7d, 0xee,
-	0x1f, 0x15, 0x98, 0x7f, 0x8f, 0xfd, 0xc0, 0x72, 0x9d, 0x37, 0x21, 0xf1, 0x42, 0x42, 0x7b, 0xce,
-	0x88, 0x03, 0xb2, 0xe7, 0x88, 0x4f, 0x74, 0x13, 0x1a, 0x67, 0x16, 0xd9, 0x77, 0x87, 0x43, 0x8b,
-	0x08, 0x61, 0x63, 0x80, 0x52, 0x59, 0x23, 0xea, 0xd2, 0x72, 0xc5, 0x0d, 0x1f, 0x03, 0xe8, 0x57,
-	0x30, 0x6f, 0xd8, 0xd6, 0xde, 0xdb, 0xe7, 0x42, 0x19, 0x2b, 0xf7, 0x95, 0x5e, 0x12, 0x44, 0x5b,
-	0xf4, 0x6d, 0x47, 0x81, 0x23, 0xcb, 0x91, 0x8c, 0x33, 0x8c, 0x71, 0x02, 0x47, 0x3b, 0xb0, 0x64,
-	0xb8, 0x0e, 0xf1, 0x5d, 0xdb, 0xc6, 0x7e, 0x4c, 0xf0, 0x2c, 0xe3, 0xcf, 0xa4, 0xa1, 0xc7, 0x70,
-	0x3d, 0x81, 0xc7, 0xd4, 0xd4, 0xd8, 0xb6, 0x3c, 0x32, 0xfa, 0x2d, 0x2c, 0x9a, 0x3a, 0xd1, 0x0f,
-	0x5d, 0x7f, 0xa8, 0x13, 0xb9, 0xa7, 0xce, 0xf6, 0x4c, 0x12, 0xa8, 0x6d, 0x63, 0x30, 0xa6, 0xa4,
-	0xc1, 0x6d, 0xcb, 0xa2, 0x69, 0xcf, 0xe1, 0x9a, 0x58, 0x76, 0x31, 0xd1, 0x2d, 0x9b, 0xdd, 0x60,
-	0xcf, 0xbe, 0x40, 0x0f, 0x92, 0x01, 0x69, 0xee, 0x2c, 0x47, 0x17, 0x26, 0x11, 0xb9, 0x28, 0x50,
-	0xda, 0xbf, 0xca, 0x50, 0xed, 0x5a, 0xc1, 0x39, 0xeb, 0xa0, 0xa6, 0x08, 0x63, 0xd9, 0x32, 0x33,
-	0x67, 0x38, 0xda, 0x55, 0x75, 0x32, 0x10, 0x21, 0x63, 0x6b, 0x8a, 0x91, 0x0b, 0x0f, 0x8b, 0xc1,
-	0x8d, 0xad, 0x69, 0xa9, 0x23, 0x2e, 0x91, 0xdd, 0x9a, 0x47, 0xa5, 0xc1, 0x10, 0x56, 0x8a, 0x57,
-	0xa0, 0xf1, 0xd1, 0xc7, 0x78, 0x3c, 0xb5, 0x55, 0x68, 0x99, 0xc4, 0x98, 0x11, 0xef, 0xc0, 0x1c,
-	0xdf, 0x7b, 0x6a, 0xbb, 0xc6, 0x79, 0x20, 0x9c, 0xdd, 0x64, 0xd8, 0x33, 0x06, 0xd1, 0x1b, 0xc4,
-	0xf6, 0x0b, 0x0e, 0xee, 0x5a, 0xa0, 0x90, 0x60, 0xb8, 0x05, 0xc0, 0x68, 0x5c, 0x03, 0xf7, 0x64,
-	0x83, 0x21, 0x52, 0x85, 0x61, 0x87, 0x01, 0xc1, 0x3e, 0x67, 0x00, 0xae, 0x42, 0x60, 0x94, 0x85,
-	0xde, 0xe1, 0x45, 0xea, 0x96, 0x64, 0x57, 0x5a, 0x81, 0x86, 0x69, 0x05, 0xe7, 0xf1, 0x8b, 0x5b,
-	0xa7, 0x80, 0xec, 0x3e, 0x8c, 0x18, 0xf3, 0x1a, 0x23, 0xca, 0xd1, 0x88, 0x11, 0x63, 0xee, 0x63,
-	0xc4, 0xb7, 0xd4, 0x85, 0x49, 0x73, 0xab, 0x29, 0x73, 0xb5, 0xfb, 0xd0, 0xa2, 0xa6, 0xc4, 0xca,
-	0x74, 0x91, 0x1d, 0xda, 0x11, 0xb7, 0x3c, 0x59, 0x74, 0xbe, 0xd8, 0xf2, 0xad, 0x0d, 0x68, 0xc6,
-	0x7a, 0x37, 0x9a, 0x85, 0xf2, 0xc9, 0x9b, 0xf6, 0x15, 0xfa, 0xdb, 0x3b, 0x69, 0x97, 0x50, 0x0d,
-	0x2a, 0x07, 0xbd, 0x5e, 0xbb, 0xbc, 0xf3, 0xdd, 0x02, 0x34, 0x8f, 0xdf, 0x76, 0x5f, 0x1e, 0x63,
-	0x7f, 0x64, 0x19, 0x18, 0x3d, 0x8d, 0xe6, 0x18, 0xee, 0x43, 0x74, 0x2b, 0xfd, 0x16, 0x48, 0xf8,
-	0x56, 0x9d, 0x98, 0x62, 0xd0, 0x61, 0x24, 0x81, 0x9f, 0x65, 0x52, 0x42, 0xe2, 0x8c, 0xea, 0x72,
-	0x87, 0xff, 0x61, 0xd3, 0x91, 0x7f, 0xd8, 0x74, 0x0e, 0x86, 0x1e, 0xb9, 0x40, 0x4f, 0x00, 0xc6,
-	0xa3, 0x1d, 0x52, 0xd3, 0x42, 0xc6, 0x7e, 0xcd, 0xb0, 0x61, 0x1f, 0xae, 0xa5, 0x26, 0x07, 0x71,
-	0x1a, 0x25, 0x62, 0x4d, 0xd5, 0xd7, 0x0c, 0x21, 0xcf, 0x27, 0x84, 0x88, 0x03, 0xe5, 0x0b, 0xc9,
-	0x3b, 0xcb, 0x7e, 0x14, 0x0d, 0xda, 0x5e, 0x51, 0x0e, 0x9b, 0x7a, 0xb3, 0x68, 0xf4, 0x44, 0xcf,
-	0x60, 0x4e, 0xc0, 0x27, 0x3a, 0x31, 0x06, 0xb9, 0x52, 0x72, 0x70, 0xed, 0xca, 0x83, 0x12, 0xfa,
-	0x00, 0x37, 0x72, 0xc7, 0x4a, 0x74, 0x6f, 0x62, 0x22, 0xcd, 0x1b, 0x3d, 0xf3, 0x75, 0xa0, 0x53,
-	0x50, 0xf3, 0xe7, 0x42, 0xb4, 0x55, 0xa8, 0x22, 0x31, 0xdb, 0x14, 0xe8, 0xf8, 0x10, 0xe9, 0xc8,
-	0x18, 0x0c, 0x27, 0x75, 0xe4, 0x4f, 0x8f, 0xb9, 0x01, 0x23, 0x19, 0x7e, 0x92, 0xb3, 0x5b, 0x91,
-	0x9f, 0x52, 0x03, 0xa4, 0xba, 0x35, 0x0d, 0x2b, 0x8f, 0x6f, 0x8e, 0xef, 0xa2, 0x91, 0x0f, 0x15,
-	0xcb, 0x9a, 0xd6, 0x77, 0xef, 0x41, 0xcb, 0x34, 0x65, 0xda, 0x7b, 0x92, 0xe7, 0xb1, 0x5d, 0xf9,
-	0x28, 0x14, 0x12, 0x6e, 0x16, 0xbd, 0xcd, 0xd5, 0xf4, 0x8b, 0x10, 0x75, 0xe5, 0x76, 0x71, 0xc7,
-	0xd2, 0xdb, 0xa7, 0xab, 0x19, 0x8f, 0xa0, 0x11, 0x3d, 0x8e, 0xd1, 0x8d, 0x94, 0x88, 0x58, 0xc5,
-	0x98, 0x50, 0xbf, 0x07, 0x4b, 0x7c, 0x35, 0xb5, 0x1f, 0x26, 0x44, 0xfc, 0x29, 0x2d, 0xe2, 0x8b,
-	0xab, 0xc5, 0x1e, 0xc0, 0xf8, 0x2d, 0x9e, 0x7b, 0xcd, 0x57, 0x0a, 0x1e, 0xee, 0x68, 0x0f, 0x9a,
-	0x1c, 0xfd, 0xf2, 0x52, 0xf1, 0x5a, 0x0e, 0x1a, 0xe3, 0x77, 0x39, 0x5a, 0x4b, 0x3f, 0xe4, 0xd3,
-	0x4f, 0xf6, 0x82, 0xc4, 0xfb, 0xb3, 0x9c, 0x71, 0x92, 0xdd, 0x61, 0x3d, 0x5b, 0xe4, 0x54, 0xf1,
-	0xd6, 0xae, 0xa0, 0x47, 0x00, 0xe3, 0x86, 0x1f, 0xeb, 0x12, 0x13, 0xaf, 0x00, 0x75, 0x3e, 0x41,
-	0x43, 0x4f, 0xf9, 0x46, 0x61, 0x45, 0x72, 0xe3, 0x74, 0xc9, 0xf6, 0x3b, 0xa8, 0x89, 0x06, 0x8f,
-	0xae, 0x27, 0xb6, 0xc7, 0x12, 0x2d, 0xa5, 0xf4, 0x05, 0xb4, 0xd3, 0x2f, 0xc0, 0xdc, 0xd8, 0xdc,
-	0x4e, 0xbf, 0x01, 0x93, 0x8f, 0xc6, 0xd3, 0x59, 0xc6, 0xff, 0xf0, 0xa7, 0x00, 0x00, 0x00, 0xff,
-	0xff, 0x40, 0x90, 0xaa, 0xaa, 0x34, 0x19, 0x00, 0x00,
+	// 2638 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xcc, 0x59, 0xcb, 0x6f, 0xdb, 0xc8,
+	0x19, 0xb7, 0x9e, 0x96, 0x3e, 0xf9, 0x21, 0x4f, 0xbc, 0x5e, 0x85, 0x4e, 0x36, 0x0e, 0x9d, 0x87,
+	0xe3, 0x26, 0x4e, 0xea, 0x5d, 0x20, 0xd9, 0x0d, 0x02, 0x24, 0xb1, 0x93, 0x6e, 0x36, 0xf6, 0x6e,
+	0x20, 0xe7, 0x71, 0x59, 0x40, 0xa1, 0xc9, 0x89, 0x4c, 0x98, 0x22, 0xb9, 0xe4, 0xc8, 0x5b, 0xef,
+	0xa1, 0xc7, 0x16, 0xed, 0xb9, 0xf7, 0x05, 0x0a, 0xf4, 0xd6, 0x4b, 0xd1, 0x4b, 0x2f, 0x05, 0x7a,
+	0x68, 0x81, 0x02, 0x45, 0xff, 0xa0, 0xde, 0x8a, 0x79, 0x51, 0x1c, 0x72, 0x44, 0x29, 0x0f, 0xb4,
+	0x3d, 0x49, 0xfc, 0x7d, 0x33, 0xdf, 0x7c, 0xaf, 0xf9, 0xbe, 0x6f, 0x66, 0xe0, 0xf3, 0xbe, 0x4b,
+	0x8e, 0x86, 0x87, 0x5b, 0x76, 0x30, 0xb8, 0xe9, 0x05, 0x7e, 0xff, 0x28, 0x88, 0xfc, 0xe4, 0xcf,
+	0x8d, 0x38, 0x74, 0x8e, 0x6f, 0x60, 0xbf, 0xef, 0xfa, 0xf8, 0x66, 0x18, 0x05, 0x24, 0xb8, 0x49,
+	0x91, 0x2d, 0xf6, 0x17, 0xcd, 0xd2, 0xff, 0x51, 0x68, 0x1b, 0xab, 0xfd, 0x20, 0xe8, 0x7b, 0x62,
+	0xc4, 0xe1, 0xf0, 0xcd, 0x4d, 0x3c, 0x08, 0xc9, 0x29, 0x1f, 0x65, 0xfe, 0x58, 0x86, 0xea, 0xde,
+	0x49, 0xe0, 0x21, 0x04, 0x55, 0xdf, 0x1a, 0xe0, 0x4e, 0x69, 0xad, 0xb4, 0xd1, 0xec, 0xb2, 0xff,
+	0x14, 0x1b, 0x0e, 0x5d, 0xa7, 0x53, 0xe6, 0x18, 0xfd, 0x8f, 0x56, 0xa1, 0x19, 0x87, 0xd8, 0xee,
+	0xc5, 0xee, 0x0f, 0xb8, 0x53, 0x59, 0x2b, 0x6d, 0x54, 0xbb, 0x0d, 0x0a, 0x1c, 0xb8, 0x3f, 0x60,
+	0x74, 0x01, 0x5a, 0x96, 0x4d, 0x86, 0x96, 0xc7, 0xc9, 0x55, 0x46, 0x06, 0x0e, 0xb1, 0x01, 0x2b,
+	0x50, 0x0f, 0xad, 0x08, 0xfb, 0xa4, 0x53, 0x63, 0x3c, 0xc5, 0x17, 0xba, 0x0d, 0x0d, 0xfb, 0xc8,
+	0xf5, 0x9c, 0x08, 0xfb, 0x9d, 0xfa, 0x5a, 0x65, 0xa3, 0xb5, 0xbd, 0xba, 0x25, 0xe4, 0xdf, 0xa2,
+	0xe2, 0x6d, 0xed, 0x08, 0xea, 0x23, 0x9f, 0x44, 0xa7, 0xdd, 0x64, 0x30, 0x5a, 0x87, 0x79, 0x3b,
+	0xc2, 0x16, 0x71, 0x03, 0xbf, 0x47, 0xdc, 0x01, 0xee, 0xcc, 0x32, 0xbe, 0x73, 0x12, 0x7c, 0xee,
+	0x0e, 0xb0, 0x71, 0x17, 0xe6, 0x95, 0xf9, 0xa8, 0x0d, 0x95, 0x63, 0x7c, 0x2a, 0x74, 0xa5, 0x7f,
+	0xd1, 0x32, 0xd4, 0x4e, 0x2c, 0x6f, 0x88, 0x99, 0xae, 0x8d, 0x2e, 0xff, 0xf8, 0xa2, 0x7c, 0xa7,
+	0x64, 0xfe, 0xb1, 0x02, 0xb3, 0x5d, 0x1c, 0x7a, 0xae, 0x6d, 0x4d, 0x6d, 0xa4, 0xb3, 0xd0, 0xf0,
+	0x4e, 0xe2, 0x1e, 0x1b, 0x5b, 0x61, 0xf8, 0xac, 0x77, 0x12, 0x7f, 0x4d, 0x87, 0x0b, 0x12, 0x9b,
+	0x52, 0x4d, 0x48, 0x2f, 0x72, 0xa6, 0xad, 0x15, 0x9b, 0xb6, 0x9e, 0x33, 0xed, 0x02, 0x94, 0xdd,
+	0x50, 0xa8, 0x5f, 0x76, 0x43, 0x74, 0x1e, 0x20, 0x0c, 0x22, 0xd2, 0x8b, 0x89, 0x15, 0x91, 0x4e,
+	0x63, 0xad, 0xb4, 0x51, 0xeb, 0x36, 0x29, 0x72, 0x40, 0x01, 0x2a, 0x07, 0x23, 0x63, 0xdf, 0xe9,
+	0x34, 0x19, 0x71, 0x96, 0x7e, 0x3f, 0xf2, 0x1d, 0x74, 0x0f, 0x9a, 0xb1, 0x6f, 0x85, 0xf1, 0x51,
+	0x40, 0xe2, 0x0e, 0x30, 0x6f, 0x5c, 0x48, 0xbc, 0x21, 0x4c, 0xb1, 0x75, 0x20, 0x47, 0x70, 0x8f,
+	0x8c, 0x66, 0xa0, 0x4f, 0x00, 0x22, 0x7c, 0x38, 0x74, 0x3d, 0xc7, 0xf5, 0xfb, 0x9d, 0x16, 0xb3,
+	0x67, 0x0a, 0xa1, 0xa6, 0x8e, 0x89, 0x45, 0x70, 0x67, 0x8e, 0xc9, 0xca, 0x3f, 0x8c, 0xa7, 0xb0,
+	0xa0, 0xb2, 0xd4, 0x38, 0x69, 0x3d, 0xed, 0xa4, 0xd6, 0xf6, 0xbc, 0x12, 0x22, 0x69, 0x9f, 0xfd,
+	0xbd, 0x04, 0xcb, 0x42, 0xd0, 0x1d, 0x1a, 0x08, 0xb8, 0x8b, 0xbf, 0x1b, 0xe2, 0x98, 0x68, 0x1d,
+	0x98, 0x76, 0x56, 0x79, 0xbc, 0xb3, 0x2a, 0x05, 0xce, 0xaa, 0x66, 0x9c, 0x75, 0x15, 0x16, 0xf1,
+	0xcf, 0xc3, 0x20, 0xc6, 0xbd, 0x08, 0x7f, 0x37, 0x74, 0x23, 0xec, 0x30, 0x7f, 0x36, 0xba, 0x0b,
+	0x1c, 0xee, 0x0a, 0x34, 0x71, 0x92, 0x1d, 0x0c, 0x7d, 0xc2, 0x9c, 0x2a, 0x9c, 0xb4, 0x43, 0x01,
+	0xf3, 0x45, 0xa2, 0xc6, 0x2e, 0xf6, 0x70, 0xb1, 0x1a, 0xd7, 0xa0, 0x6d, 0x7b, 0xd8, 0xf2, 0x87,
+	0xe1, 0x68, 0x51, 0x1e, 0xcc, 0x8b, 0x02, 0x97, 0xab, 0x9a, 0x57, 0x61, 0x49, 0xb0, 0xfd, 0x19,
+	0x26, 0x05, 0x3c, 0xcd, 0x3f, 0x94, 0xe0, 0x8c, 0x18, 0xb9, 0xe7, 0xc6, 0xa4, 0x8b, 0xe3, 0x30,
+	0xf0, 0x63, 0x8c, 0x1e, 0x43, 0x23, 0xe2, 0x70, 0xdc, 0x29, 0xb1, 0x00, 0xd9, 0xcc, 0x06, 0x48,
+	0x7a, 0xbc, 0xc4, 0x44, 0xac, 0x24, 0x73, 0x8d, 0x7d, 0x98, 0x57, 0x48, 0x1a, 0x9f, 0x5f, 0x51,
+	0x7d, 0xde, 0xce, 0xae, 0x93, 0x76, 0xfb, 0x8f, 0x25, 0x58, 0x93, 0x70, 0x12, 0x6f, 0x07, 0x91,
+	0xcd, 0x22, 0xbe, 0xc8, 0x76, 0x1b, 0xd0, 0x76, 0x62, 0xd2, 0x13, 0x72, 0xa5, 0x43, 0x61, 0xc1,
+	0xa1, 0x6a, 0x30, 0x98, 0x45, 0xc4, 0x3d, 0x58, 0xe5, 0x23, 0x25, 0xfb, 0x9e, 0x77, 0x12, 0x78,
+	0x3d, 0xcb, 0x71, 0x22, 0x1c, 0xc7, 0x22, 0x48, 0x3a, 0x6c, 0x92, 0x1c, 0x41, 0x83, 0xf3, 0x01,
+	0xa7, 0x9b, 0x16, 0x5c, 0xd4, 0x09, 0xf8, 0xd8, 0xf5, 0xdd, 0xf8, 0xe8, 0x83, 0x48, 0x68, 0x7e,
+	0x9b, 0x2c, 0x21, 0xf7, 0xd3, 0xc1, 0x91, 0xe5, 0x79, 0xc1, 0xf7, 0x3b, 0x41, 0x78, 0x5a, 0xb4,
+	0xc4, 0x3a, 0xcc, 0xcb, 0x4d, 0x9c, 0xe6, 0x3f, 0x27, 0x41, 0xc6, 0xbd, 0xa7, 0xb1, 0xf0, 0x6e,
+	0x4c, 0x26, 0x5a, 0x58, 0xb3, 0x23, 0xca, 0xba, 0x1d, 0x61, 0xde, 0xd3, 0x58, 0x68, 0xb4, 0x80,
+	0x88, 0xbf, 0x0e, 0xcc, 0x4a, 0x8b, 0xf3, 0x45, 0xe4, 0xa7, 0xe9, 0xe8, 0xa7, 0x4f, 0x36, 0xf0,
+	0x4f, 0x60, 0x69, 0xe8, 0xeb, 0x45, 0x6c, 0x4b, 0x42, 0x22, 0xe4, 0x9f, 0xaa, 0x50, 0x7f, 0xc4,
+	0xea, 0xae, 0x96, 0xd7, 0x05, 0x68, 0x9d, 0x04, 0xde, 0x70, 0x80, 0xd3, 0x76, 0x04, 0x0e, 0xb1,
+	0x28, 0x7a, 0xbf, 0x22, 0xca, 0x33, 0x7d, 0x2d, 0xc9, 0xf4, 0x08, 0xaa, 0x34, 0x65, 0x88, 0xf4,
+	0xc1, 0xfe, 0xa3, 0x97, 0x70, 0x46, 0xc6, 0x8a, 0x30, 0x4d, 0x6f, 0x60, 0xd1, 0xf2, 0x40, 0x37,
+	0xeb, 0x95, 0x64, 0x13, 0x71, 0x25, 0xe4, 0x5e, 0x12, 0x51, 0xba, 0x6f, 0x85, 0x7c, 0xa3, 0x2e,
+	0x45, 0x59, 0x1c, 0xed, 0x43, 0x5b, 0xf2, 0x1d, 0x04, 0x0e, 0x66, 0x4c, 0x1b, 0x8c, 0xe9, 0xfa,
+	0x18, 0xa6, 0xfb, 0x81, 0x83, 0x13, 0x8e, 0x0b, 0x91, 0x02, 0x22, 0x03, 0x1a, 0x6f, 0xa2, 0xc0,
+	0x27, 0xb2, 0x0a, 0x35, 0xbb, 0xc9, 0x37, 0xa5, 0x61, 0xdf, 0x09, 0x03, 0xd7, 0x27, 0x1d, 0xe0,
+	0x34, 0xf9, 0x3d, 0xaa, 0x21, 0xad, 0x74, 0x0d, 0xd9, 0x85, 0x15, 0xbd, 0x26, 0x93, 0x0a, 0x7e,
+	0x33, 0x95, 0x45, 0x8c, 0x57, 0x49, 0xce, 0x4b, 0x8b, 0xae, 0x61, 0xb1, 0x99, 0x66, 0xb1, 0xb0,
+	0xbd, 0x9c, 0x4d, 0x4d, 0x74, 0x7a, 0x3a, 0x3d, 0xfd, 0xab, 0x0c, 0x67, 0xb8, 0x6d, 0x26, 0x17,
+	0xa5, 0xf7, 0x0b, 0x21, 0x5b, 0xef, 0xfd, 0x2a, 0x73, 0xd4, 0xa7, 0x19, 0x47, 0x29, 0xc2, 0xbc,
+	0x45, 0x28, 0xa4, 0x7d, 0x57, 0xcb, 0xf8, 0xae, 0xb8, 0xae, 0x7d, 0x18, 0x47, 0x99, 0xd7, 0xa4,
+	0x39, 0x27, 0x16, 0x47, 0xf3, 0x0a, 0xb4, 0xf9, 0xd0, 0x09, 0x05, 0xef, 0xf7, 0x25, 0x40, 0x7c,
+	0xa0, 0x52, 0xef, 0x1e, 0xc2, 0x2c, 0x6f, 0xb3, 0x65, 0xb9, 0xdb, 0xc8, 0xd8, 0x50, 0xa9, 0x76,
+	0x1c, 0x12, 0xc5, 0x4e, 0x4e, 0x34, 0x9e, 0xc2, 0x5c, 0x9a, 0xa0, 0xd1, 0xf4, 0xb2, 0x5a, 0xea,
+	0x16, 0x33, 0x6b, 0xa4, 0x55, 0xff, 0x65, 0x09, 0x3e, 0x16, 0x68, 0x62, 0x47, 0xa9, 0xd7, 0x05,
+	0x68, 0xf1, 0x35, 0x7b, 0x29, 0xf5, 0x80, 0x43, 0x2c, 0x74, 0x2e, 0xc2, 0x9c, 0xa6, 0x8e, 0xb4,
+	0xa2, 0x54, 0x99, 0xbb, 0x0a, 0x8b, 0x99, 0x00, 0x12, 0xa5, 0x6d, 0x41, 0x8d, 0x03, 0xf3, 0x2e,
+	0x74, 0x14, 0x39, 0xb8, 0x21, 0xa6, 0x13, 0xc4, 0xfc, 0x73, 0x09, 0xce, 0x6a, 0x66, 0x0b, 0xa3,
+	0xef, 0xe5, 0x9a, 0x8c, 0x5b, 0x59, 0x8b, 0xfc, 0xef, 0x5a, 0x8d, 0x5f, 0x97, 0xc0, 0x50, 0x84,
+	0x50, 0x63, 0xf0, 0xbf, 0xea, 0x83, 0xaf, 0x60, 0x51, 0x96, 0xfa, 0xf7, 0xae, 0xef, 0xbf, 0xaa,
+	0xc0, 0xfc, 0x4b, 0x1c, 0xc5, 0x6e, 0xe0, 0x7f, 0x33, 0x24, 0xe1, 0x90, 0xd0, 0x5a, 0x7b, 0xc2,
+	0x01, 0x59, 0x6b, 0xc5, 0x27, 0x3a, 0x07, 0xcd, 0xbe, 0x4b, 0x76, 0x82, 0xc1, 0xc0, 0x25, 0x82,
+	0xd9, 0x08, 0xa0, 0x54, 0x56, 0x80, 0x77, 0x69, 0x9a, 0xe6, 0x82, 0x8f, 0x00, 0x74, 0x09, 0xe6,
+	0x6d, 0xcf, 0x7d, 0xf0, 0xec, 0x89, 0x58, 0x8c, 0x95, 0xb9, 0x4a, 0x57, 0x05, 0xd1, 0x26, 0xed,
+	0x69, 0x29, 0xb0, 0xef, 0xfa, 0x72, 0x60, 0x8d, 0x0d, 0xcc, 0xe1, 0x68, 0x1b, 0x96, 0xed, 0xc0,
+	0x27, 0x51, 0xe0, 0x79, 0x38, 0x4a, 0x31, 0xae, 0xb3, 0xf1, 0x5a, 0x1a, 0xba, 0x03, 0x1f, 0x2b,
+	0x78, 0x6a, 0x99, 0x59, 0x36, 0x6d, 0x1c, 0x19, 0x5d, 0x87, 0x25, 0xc7, 0x22, 0xd6, 0xe3, 0x20,
+	0x1a, 0x58, 0x44, 0xce, 0x69, 0xb0, 0x39, 0x79, 0x02, 0x95, 0x6d, 0x04, 0xa6, 0x16, 0x69, 0x72,
+	0xd9, 0x74, 0x34, 0xf3, 0x09, 0x7c, 0x24, 0xfe, 0xee, 0x62, 0x62, 0xb9, 0x1e, 0xcb, 0x5c, 0xa1,
+	0x77, 0x8a, 0x6e, 0xa9, 0x0e, 0x69, 0x6d, 0xaf, 0x24, 0x81, 0xaa, 0x78, 0x2e, 0x71, 0x94, 0xf9,
+	0x9b, 0x1a, 0x9c, 0x79, 0x68, 0xd9, 0xc7, 0xc3, 0x50, 0x2d, 0x3c, 0xb9, 0x88, 0x28, 0xe5, 0x23,
+	0x82, 0x0e, 0x3a, 0x64, 0x73, 0x7b, 0xc4, 0x8a, 0xfa, 0x58, 0x7a, 0x7a, 0x8e, 0x83, 0xcf, 0x19,
+	0x96, 0x2d, 0x57, 0x95, 0x5c, 0xb9, 0x42, 0x50, 0x4d, 0xba, 0x99, 0x4a, 0x97, 0xfd, 0xcf, 0x6e,
+	0x92, 0xda, 0xc4, 0x4d, 0x52, 0xcf, 0x6f, 0x92, 0x15, 0xa8, 0x7b, 0xd6, 0x21, 0xf6, 0x62, 0xd6,
+	0xda, 0x34, 0xbb, 0xe2, 0x0b, 0xed, 0x01, 0xd8, 0x11, 0x76, 0xb0, 0x4f, 0x5c, 0xcb, 0x13, 0x1d,
+	0xca, 0xf5, 0xc4, 0x4e, 0x1a, 0x63, 0x6c, 0xed, 0x24, 0xc3, 0x79, 0xea, 0x48, 0xcd, 0x47, 0xd7,
+	0x01, 0x51, 0x75, 0x69, 0xbb, 0xef, 0x0e, 0xac, 0xbe, 0x10, 0x98, 0x37, 0x2c, 0x6d, 0x41, 0x79,
+	0x42, 0x09, 0x4c, 0xa6, 0xcf, 0x60, 0x45, 0x1d, 0x6d, 0x1f, 0x61, 0xfb, 0x38, 0x1e, 0x0e, 0x44,
+	0x1b, 0xb3, 0x9c, 0x9e, 0xb1, 0x23, 0x68, 0xd4, 0x1a, 0xc2, 0xce, 0x8c, 0x39, 0x6f, 0x6c, 0x80,
+	0x43, 0x8c, 0xed, 0x0d, 0x40, 0x76, 0x30, 0x08, 0xe9, 0x96, 0x77, 0x03, 0xbf, 0x37, 0xc0, 0xe4,
+	0x28, 0x70, 0xc4, 0x21, 0x7a, 0x29, 0x45, 0xd9, 0x67, 0x04, 0x76, 0x1e, 0x0c, 0x7c, 0x7b, 0x18,
+	0x45, 0xd8, 0x27, 0x3d, 0xcf, 0xa5, 0x9b, 0x74, 0x9e, 0x15, 0xe2, 0xc5, 0x11, 0xbe, 0x47, 0x61,
+	0xaa, 0x5e, 0x4c, 0x82, 0x88, 0x89, 0xea, 0x59, 0xb1, 0x38, 0x0b, 0x2f, 0x70, 0xf5, 0x04, 0x65,
+	0x87, 0x12, 0xa8, 0x1c, 0xc6, 0x3d, 0x58, 0xcc, 0xd8, 0xea, 0xad, 0xaa, 0xf6, 0x2f, 0x60, 0x59,
+	0x35, 0xbf, 0x48, 0xf7, 0x2b, 0x50, 0xe7, 0xca, 0x0a, 0x36, 0xe2, 0x0b, 0x5d, 0x86, 0x05, 0x37,
+	0xee, 0xb9, 0xbe, 0x1d, 0xe1, 0x01, 0xf6, 0x89, 0xe5, 0x89, 0xae, 0x7c, 0xde, 0x8d, 0x9f, 0x8c,
+	0xc0, 0xe9, 0xb3, 0xe5, 0xf7, 0x72, 0x2f, 0x1c, 0x10, 0x8b, 0x0c, 0x63, 0xb9, 0x17, 0xc6, 0x2d,
+	0x9f, 0x09, 0xd2, 0x72, 0x2e, 0x48, 0xa7, 0x5e, 0xf8, 0x9f, 0x25, 0xa9, 0xb9, 0x5c, 0x59, 0x68,
+	0x6e, 0x40, 0x23, 0x8c, 0x82, 0x7e, 0x72, 0x9c, 0xa9, 0x75, 0x93, 0x6f, 0xda, 0x48, 0x89, 0xa8,
+	0x18, 0x46, 0x9e, 0x4c, 0xb2, 0x1c, 0x79, 0x11, 0x79, 0xd4, 0xcc, 0x38, 0x8a, 0x82, 0x48, 0x2c,
+	0xc9, 0x3f, 0xf2, 0xfb, 0xba, 0xaa, 0xd9, 0xd7, 0x49, 0x0b, 0x5d, 0x4b, 0xb5, 0xd0, 0x3a, 0x6d,
+	0xea, 0x5a, 0x6d, 0xfe, 0x5a, 0x96, 0x05, 0x90, 0xeb, 0xd4, 0xc5, 0x34, 0x50, 0x92, 0xd4, 0xa2,
+	0xca, 0x5d, 0xca, 0xca, 0x3d, 0xd1, 0xaa, 0x39, 0x15, 0x2a, 0x1a, 0x15, 0x0e, 0x94, 0x4d, 0xae,
+	0xef, 0x6e, 0x75, 0xd2, 0x15, 0xee, 0x75, 0xdd, 0xbe, 0xa9, 0x69, 0xf7, 0xcd, 0xfb, 0xee, 0x84,
+	0xdf, 0x95, 0x60, 0x55, 0x2b, 0xa4, 0x88, 0x8b, 0x2f, 0xa1, 0xce, 0xfc, 0x19, 0x0b, 0xd5, 0x6e,
+	0x15, 0xab, 0x26, 0xbb, 0x4f, 0x36, 0x85, 0xeb, 0x25, 0xe6, 0x1b, 0x9f, 0x43, 0x2b, 0x05, 0xbf,
+	0x95, 0x90, 0x3b, 0xb0, 0xa6, 0x59, 0x4d, 0x3d, 0x4f, 0x4f, 0x6c, 0xf4, 0xfe, 0x56, 0x86, 0x55,
+	0xd1, 0x27, 0xbd, 0x4b, 0xb4, 0x4c, 0xd1, 0x2c, 0x4d, 0x15, 0x2f, 0xcf, 0x35, 0xf1, 0xf2, 0x59,
+	0xb6, 0xcb, 0xfb, 0x3f, 0x0e, 0x98, 0xdb, 0xb0, 0x2c, 0xe4, 0x52, 0x73, 0xd7, 0x44, 0xfb, 0xdf,
+	0x4f, 0xcc, 0xaf, 0x9d, 0x3f, 0xd9, 0xbe, 0xe6, 0xbf, 0xcb, 0x70, 0x4e, 0xcf, 0x42, 0x04, 0x6b,
+	0x96, 0x47, 0x69, 0xaa, 0x86, 0xb6, 0xac, 0xcb, 0x2d, 0x94, 0x97, 0x1b, 0xf7, 0x22, 0xb6, 0x8e,
+	0xeb, 0xf7, 0x99, 0x2f, 0x1b, 0xdd, 0x96, 0x1b, 0x77, 0x25, 0x44, 0xfd, 0xed, 0x59, 0xec, 0x42,
+	0x8c, 0x09, 0x23, 0xef, 0xd2, 0xe7, 0x28, 0x28, 0x04, 0x74, 0x94, 0xc4, 0x5a, 0xcb, 0x24, 0xd6,
+	0x24, 0x73, 0xd6, 0xd3, 0x99, 0xf3, 0x12, 0x2c, 0x38, 0x38, 0x26, 0xbd, 0x37, 0xae, 0x27, 0x8c,
+	0x29, 0xde, 0x13, 0x28, 0xfa, 0xd8, 0xf5, 0xb0, 0x9a, 0x3a, 0x1b, 0xe9, 0xd4, 0xa9, 0x06, 0x71,
+	0x33, 0x1b, 0xc4, 0x77, 0xa0, 0x23, 0x63, 0x24, 0xd1, 0xac, 0x27, 0x4a, 0x0e, 0xef, 0x0b, 0x56,
+	0x04, 0x3d, 0xd1, 0x92, 0x87, 0xa2, 0xf9, 0x97, 0x12, 0x7c, 0xa4, 0x37, 0xfa, 0x43, 0xa8, 0xc7,
+	0x0c, 0xd1, 0xdc, 0xc2, 0x6a, 0xc6, 0x6f, 0xf1, 0x4f, 0x91, 0x1b, 0xf8, 0x4c, 0xe3, 0x35, 0xb4,
+	0x52, 0xb0, 0x26, 0x1e, 0xef, 0xaa, 0xc7, 0xa2, 0xcb, 0xb9, 0x63, 0x91, 0x6e, 0xa9, 0x74, 0xd8,
+	0xfe, 0xb6, 0x0c, 0xd5, 0x5d, 0x37, 0x3e, 0x66, 0x17, 0x57, 0x8e, 0x60, 0x5d, 0x76, 0x1d, 0xed,
+	0xd3, 0x09, 0x82, 0x6a, 0x68, 0x91, 0x23, 0xb1, 0x7f, 0xd9, 0x7f, 0x8a, 0x91, 0xd3, 0x50, 0x96,
+	0x31, 0xf6, 0x9f, 0x5a, 0x9b, 0x04, 0x44, 0x5e, 0x92, 0xf1, 0x43, 0x41, 0x93, 0x21, 0xec, 0x06,
+	0x64, 0x15, 0x9a, 0x6f, 0x22, 0x8c, 0x47, 0x8f, 0x25, 0x95, 0x6e, 0x83, 0x02, 0x8c, 0x78, 0x11,
+	0xe6, 0xf8, 0xdc, 0x43, 0x2f, 0xb0, 0x8f, 0x63, 0xd1, 0xeb, 0xb7, 0x18, 0xf6, 0x90, 0x41, 0x74,
+	0x4b, 0xb1, 0xf9, 0x62, 0x04, 0xef, 0xec, 0x81, 0x42, 0x62, 0x00, 0xf5, 0x36, 0xfd, 0xc7, 0x57,
+	0xe0, 0x8d, 0x7c, 0x93, 0x21, 0x72, 0x09, 0xdb, 0x1b, 0xc6, 0x04, 0x47, 0x7c, 0x00, 0xf0, 0x25,
+	0x04, 0x46, 0x87, 0xd0, 0x23, 0xe4, 0x12, 0x35, 0x8b, 0xda, 0x93, 0xaf, 0x42, 0xd3, 0x71, 0xe3,
+	0xe3, 0xf4, 0x26, 0x6a, 0x50, 0x40, 0x5e, 0xfa, 0x30, 0x62, 0xca, 0x6a, 0x8c, 0x28, 0x5f, 0x24,
+	0x18, 0x31, 0x65, 0x3e, 0x46, 0x7c, 0x46, 0x4d, 0xa8, 0x8a, 0x5b, 0xcd, 0x88, 0x6b, 0xde, 0x80,
+	0x05, 0x2a, 0x4a, 0xea, 0x76, 0xa4, 0x48, 0x0e, 0x73, 0x9f, 0x4b, 0xae, 0x9e, 0x79, 0xdf, 0x59,
+	0xf2, 0xcd, 0x2b, 0xd0, 0x4a, 0x5d, 0x99, 0xa1, 0x3a, 0x94, 0x5f, 0x7d, 0xd3, 0x9e, 0xa1, 0xbf,
+	0xdd, 0x57, 0xed, 0x12, 0x9a, 0x85, 0xca, 0xa3, 0x6e, 0xb7, 0x5d, 0xde, 0xfe, 0xc7, 0x0a, 0xb4,
+	0x0e, 0x9e, 0xed, 0x3e, 0x3d, 0xc0, 0xd1, 0x89, 0x6b, 0x63, 0x74, 0x3f, 0x39, 0xd3, 0x73, 0x1b,
+	0xa2, 0xf3, 0xd9, 0xd8, 0x54, 0x6c, 0x6b, 0xe4, 0x4e, 0xf4, 0xe8, 0x71, 0xc2, 0x81, 0xeb, 0x92,
+	0xe7, 0xa0, 0xe8, 0x68, 0xac, 0x6c, 0xf1, 0xc7, 0xd4, 0x2d, 0xf9, 0x98, 0xba, 0xf5, 0x68, 0x10,
+	0x92, 0x53, 0xf4, 0x05, 0xc0, 0xe8, 0x45, 0x05, 0x19, 0x59, 0x26, 0x23, 0xbb, 0x6a, 0x64, 0xd8,
+	0xa1, 0xbb, 0x5b, 0xb9, 0xb0, 0x17, 0xda, 0x74, 0x92, 0xa1, 0x99, 0xe3, 0xbd, 0x86, 0xc9, 0x93,
+	0x1c, 0x13, 0xa1, 0xd0, 0x78, 0x26, 0xe3, 0x74, 0xd9, 0x49, 0xbc, 0xb1, 0xe7, 0xd2, 0xc6, 0x58,
+	0x3f, 0xcc, 0x38, 0x57, 0xf4, 0xe2, 0x83, 0x1e, 0xc2, 0x9c, 0x80, 0x5f, 0x59, 0xc4, 0x3e, 0x1a,
+	0xcb, 0x65, 0x0c, 0x6e, 0xce, 0xdc, 0x2a, 0xa1, 0xd7, 0x70, 0x76, 0xec, 0x6b, 0x0e, 0xba, 0x96,
+	0x4f, 0x43, 0x63, 0x5e, 0x7c, 0xc6, 0xaf, 0x81, 0x0e, 0xc1, 0x18, 0xff, 0x1c, 0x83, 0x36, 0x0b,
+	0x97, 0x50, 0x5a, 0xa0, 0x82, 0x35, 0x5e, 0x27, 0x6b, 0x68, 0xde, 0x63, 0xf2, 0x6b, 0x8c, 0x7f,
+	0xb4, 0x19, 0xeb, 0x30, 0xa2, 0xb1, 0x93, 0x7c, 0x32, 0x29, 0xb2, 0x53, 0xe6, 0xdd, 0xc6, 0xd8,
+	0x9c, 0x66, 0x28, 0xf7, 0xef, 0x18, 0xdb, 0x25, 0x2f, 0x2d, 0xa8, 0x98, 0xd7, 0xb4, 0xb6, 0x7b,
+	0x09, 0xa6, 0x56, 0x94, 0x69, 0xf7, 0xc9, 0x38, 0x8b, 0x3d, 0x4f, 0xae, 0xf8, 0xd3, 0x47, 0x51,
+	0x74, 0xae, 0xe8, 0x82, 0xc0, 0x38, 0x3f, 0x86, 0x9a, 0x58, 0x24, 0xcb, 0x95, 0x57, 0xc4, 0x1c,
+	0x57, 0xa5, 0xf7, 0xca, 0x71, 0x55, 0xcb, 0x28, 0xb3, 0xc1, 0xb2, 0xae, 0x33, 0x45, 0x97, 0xa6,
+	0x69, 0x5c, 0x0b, 0x6c, 0x8b, 0x13, 0xbe, 0x4a, 0x01, 0xcf, 0xf3, 0xd5, 0xb5, 0x8c, 0xc6, 0x74,
+	0x5d, 0x80, 0x39, 0x83, 0xee, 0xc9, 0x6b, 0xef, 0x9c, 0x8d, 0x35, 0xaf, 0x0f, 0x46, 0xf6, 0xce,
+	0x1b, 0xed, 0xca, 0xe9, 0x22, 0x9d, 0x65, 0xa7, 0x4f, 0x97, 0x9e, 0x6f, 0x43, 0x33, 0xb9, 0xfe,
+	0x47, 0x67, 0x33, 0x2c, 0x52, 0xc9, 0x39, 0xb7, 0xfc, 0x03, 0x58, 0xe6, 0xff, 0xa6, 0x0e, 0xb9,
+	0x1c, 0x8b, 0x2f, 0xb3, 0x2c, 0xde, 0x39, 0x31, 0x3f, 0x00, 0x18, 0xbd, 0x36, 0x8c, 0xcd, 0xa8,
+	0xab, 0x05, 0x4f, 0x13, 0xe8, 0x01, 0xb4, 0x38, 0xfa, 0xee, 0x59, 0xf9, 0x5b, 0x58, 0xca, 0xdd,
+	0xbe, 0xa3, 0x8b, 0x45, 0x37, 0xf3, 0x5c, 0x2b, 0x73, 0xf2, 0xe5, 0xbd, 0x39, 0x83, 0xbe, 0x96,
+	0x0f, 0x35, 0xa3, 0x77, 0x0d, 0xb4, 0xa6, 0x9f, 0x39, 0x7a, 0xf2, 0x28, 0x88, 0xf2, 0xe7, 0xf2,
+	0x8d, 0x48, 0x2d, 0xf3, 0xeb, 0x7a, 0x96, 0x53, 0x45, 0x93, 0x39, 0x83, 0x0e, 0xe4, 0x2b, 0xd1,
+	0x87, 0x4c, 0x1f, 0x19, 0xa6, 0x1f, 0x26, 0x7b, 0x1c, 0x4a, 0xfd, 0xd5, 0xe4, 0xb1, 0x3e, 0xc5,
+	0x2d, 0x89, 0x71, 0x69, 0x9a, 0xfb, 0x06, 0x56, 0xe1, 0xce, 0x8e, 0xbd, 0x22, 0x48, 0xd5, 0x9f,
+	0x49, 0xd7, 0x08, 0x85, 0x75, 0x20, 0xf1, 0x62, 0x3a, 0x55, 0x9d, 0x1f, 0x77, 0xdc, 0xe1, 0xfc,
+	0x3e, 0x29, 0x3e, 0x0d, 0x99, 0x33, 0xe8, 0x36, 0xc0, 0xa8, 0x03, 0x4f, 0xb5, 0x6d, 0xb9, 0xb6,
+	0xdc, 0x98, 0x57, 0x68, 0xe8, 0x3e, 0x9f, 0x28, 0xa2, 0x49, 0x9d, 0x38, 0x5d, 0x4a, 0xfa, 0x29,
+	0xcc, 0x8a, 0x8e, 0x1b, 0x7d, 0xac, 0x4c, 0x4f, 0xa5, 0xa3, 0xcc, 0xa2, 0x5f, 0x41, 0x3b, 0xfb,
+	0x22, 0x30, 0x76, 0x07, 0x7f, 0x92, 0x7d, 0x13, 0x50, 0x1f, 0x11, 0x0e, 0xeb, 0x6c, 0xfc, 0xa7,
+	0xff, 0x09, 0x00, 0x00, 0xff, 0xff, 0xe5, 0xb0, 0xf8, 0xda, 0x61, 0x28, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -1802,6 +2740,10 @@ type SPDKServiceClient interface {
 	ReplicaRebuildingDstStart(ctx context.Context, in *ReplicaRebuildingDstStartRequest, opts ...grpc.CallOption) (*ReplicaRebuildingDstStartResponse, error)
 	ReplicaRebuildingDstFinish(ctx context.Context, in *ReplicaRebuildingDstFinishRequest, opts ...grpc.CallOption) (*empty.Empty, error)
 	ReplicaRebuildingDstSnapshotCreate(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*empty.Empty, error)
+	ReplicaBackupCreate(ctx context.Context, in *BackupCreateRequest, opts ...grpc.CallOption) (*BackupCreateResponse, error)
+	ReplicaBackupStatus(ctx context.Context, in *BackupStatusRequest, opts ...grpc.CallOption) (*BackupStatusResponse, error)
+	ReplicaBackupRestore(ctx context.Context, in *ReplicaBackupRestoreRequest, opts ...grpc.CallOption) (*empty.Empty, error)
+	ReplicaRestoreStatus(ctx context.Context, in *ReplicaRestoreStatusRequest, opts ...grpc.CallOption) (*ReplicaRestoreStatusResponse, error)
 	EngineCreate(ctx context.Context, in *EngineCreateRequest, opts ...grpc.CallOption) (*Engine, error)
 	EngineDelete(ctx context.Context, in *EngineDeleteRequest, opts ...grpc.CallOption) (*empty.Empty, error)
 	EngineGet(ctx context.Context, in *EngineGetRequest, opts ...grpc.CallOption) (*Engine, error)
@@ -1809,8 +2751,14 @@ type SPDKServiceClient interface {
 	EngineSnapshotDelete(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*empty.Empty, error)
 	EngineList(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*EngineListResponse, error)
 	EngineWatch(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (SPDKService_EngineWatchClient, error)
+	EngineReplicaList(ctx context.Context, in *EngineReplicaListRequest, opts ...grpc.CallOption) (*EngineReplicaListResponse, error)
 	EngineReplicaAdd(ctx context.Context, in *EngineReplicaAddRequest, opts ...grpc.CallOption) (*empty.Empty, error)
 	EngineReplicaDelete(ctx context.Context, in *EngineReplicaDeleteRequest, opts ...grpc.CallOption) (*empty.Empty, error)
+	EngineBackupCreate(ctx context.Context, in *BackupCreateRequest, opts ...grpc.CallOption) (*BackupCreateResponse, error)
+	EngineBackupStatus(ctx context.Context, in *BackupStatusRequest, opts ...grpc.CallOption) (*BackupStatusResponse, error)
+	EngineBackupRestore(ctx context.Context, in *EngineBackupRestoreRequest, opts ...grpc.CallOption) (*EngineBackupRestoreResponse, error)
+	EngineBackupRestoreFinish(ctx context.Context, in *EngineBackupRestoreFinishRequest, opts ...grpc.CallOption) (*empty.Empty, error)
+	EngineRestoreStatus(ctx context.Context, in *RestoreStatusRequest, opts ...grpc.CallOption) (*RestoreStatusResponse, error)
 	DiskCreate(ctx context.Context, in *DiskCreateRequest, opts ...grpc.CallOption) (*Disk, error)
 	DiskDelete(ctx context.Context, in *DiskDeleteRequest, opts ...grpc.CallOption) (*empty.Empty, error)
 	DiskGet(ctx context.Context, in *DiskGetRequest, opts ...grpc.CallOption) (*Disk, error)
@@ -1965,6 +2913,42 @@ func (c *sPDKServiceClient) ReplicaRebuildingDstSnapshotCreate(ctx context.Conte
 	return out, nil
 }
 
+func (c *sPDKServiceClient) ReplicaBackupCreate(ctx context.Context, in *BackupCreateRequest, opts ...grpc.CallOption) (*BackupCreateResponse, error) {
+	out := new(BackupCreateResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/ReplicaBackupCreate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) ReplicaBackupStatus(ctx context.Context, in *BackupStatusRequest, opts ...grpc.CallOption) (*BackupStatusResponse, error) {
+	out := new(BackupStatusResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/ReplicaBackupStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) ReplicaBackupRestore(ctx context.Context, in *ReplicaBackupRestoreRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
+	out := new(empty.Empty)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/ReplicaBackupRestore", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) ReplicaRestoreStatus(ctx context.Context, in *ReplicaRestoreStatusRequest, opts ...grpc.CallOption) (*ReplicaRestoreStatusResponse, error) {
+	out := new(ReplicaRestoreStatusResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/ReplicaRestoreStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sPDKServiceClient) EngineCreate(ctx context.Context, in *EngineCreateRequest, opts ...grpc.CallOption) (*Engine, error) {
 	out := new(Engine)
 	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineCreate", in, out, opts...)
@@ -2051,6 +3035,15 @@ func (x *sPDKServiceEngineWatchClient) Recv() (*empty.Empty, error) {
 	return m, nil
 }
 
+func (c *sPDKServiceClient) EngineReplicaList(ctx context.Context, in *EngineReplicaListRequest, opts ...grpc.CallOption) (*EngineReplicaListResponse, error) {
+	out := new(EngineReplicaListResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineReplicaList", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sPDKServiceClient) EngineReplicaAdd(ctx context.Context, in *EngineReplicaAddRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
 	out := new(empty.Empty)
 	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineReplicaAdd", in, out, opts...)
@@ -2063,6 +3056,51 @@ func (c *sPDKServiceClient) EngineReplicaAdd(ctx context.Context, in *EngineRepl
 func (c *sPDKServiceClient) EngineReplicaDelete(ctx context.Context, in *EngineReplicaDeleteRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
 	out := new(empty.Empty)
 	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineReplicaDelete", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineBackupCreate(ctx context.Context, in *BackupCreateRequest, opts ...grpc.CallOption) (*BackupCreateResponse, error) {
+	out := new(BackupCreateResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineBackupCreate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineBackupStatus(ctx context.Context, in *BackupStatusRequest, opts ...grpc.CallOption) (*BackupStatusResponse, error) {
+	out := new(BackupStatusResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineBackupStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineBackupRestore(ctx context.Context, in *EngineBackupRestoreRequest, opts ...grpc.CallOption) (*EngineBackupRestoreResponse, error) {
+	out := new(EngineBackupRestoreResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineBackupRestore", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineBackupRestoreFinish(ctx context.Context, in *EngineBackupRestoreFinishRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
+	out := new(empty.Empty)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineBackupRestoreFinish", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineRestoreStatus(ctx context.Context, in *RestoreStatusRequest, opts ...grpc.CallOption) (*RestoreStatusResponse, error) {
+	out := new(RestoreStatusResponse)
+	err := c.cc.Invoke(ctx, "/spdkrpc.SPDKService/EngineRestoreStatus", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2120,6 +3158,10 @@ type SPDKServiceServer interface {
 	ReplicaRebuildingDstStart(context.Context, *ReplicaRebuildingDstStartRequest) (*ReplicaRebuildingDstStartResponse, error)
 	ReplicaRebuildingDstFinish(context.Context, *ReplicaRebuildingDstFinishRequest) (*empty.Empty, error)
 	ReplicaRebuildingDstSnapshotCreate(context.Context, *SnapshotRequest) (*empty.Empty, error)
+	ReplicaBackupCreate(context.Context, *BackupCreateRequest) (*BackupCreateResponse, error)
+	ReplicaBackupStatus(context.Context, *BackupStatusRequest) (*BackupStatusResponse, error)
+	ReplicaBackupRestore(context.Context, *ReplicaBackupRestoreRequest) (*empty.Empty, error)
+	ReplicaRestoreStatus(context.Context, *ReplicaRestoreStatusRequest) (*ReplicaRestoreStatusResponse, error)
 	EngineCreate(context.Context, *EngineCreateRequest) (*Engine, error)
 	EngineDelete(context.Context, *EngineDeleteRequest) (*empty.Empty, error)
 	EngineGet(context.Context, *EngineGetRequest) (*Engine, error)
@@ -2127,8 +3169,14 @@ type SPDKServiceServer interface {
 	EngineSnapshotDelete(context.Context, *SnapshotRequest) (*empty.Empty, error)
 	EngineList(context.Context, *empty.Empty) (*EngineListResponse, error)
 	EngineWatch(*empty.Empty, SPDKService_EngineWatchServer) error
+	EngineReplicaList(context.Context, *EngineReplicaListRequest) (*EngineReplicaListResponse, error)
 	EngineReplicaAdd(context.Context, *EngineReplicaAddRequest) (*empty.Empty, error)
 	EngineReplicaDelete(context.Context, *EngineReplicaDeleteRequest) (*empty.Empty, error)
+	EngineBackupCreate(context.Context, *BackupCreateRequest) (*BackupCreateResponse, error)
+	EngineBackupStatus(context.Context, *BackupStatusRequest) (*BackupStatusResponse, error)
+	EngineBackupRestore(context.Context, *EngineBackupRestoreRequest) (*EngineBackupRestoreResponse, error)
+	EngineBackupRestoreFinish(context.Context, *EngineBackupRestoreFinishRequest) (*empty.Empty, error)
+	EngineRestoreStatus(context.Context, *RestoreStatusRequest) (*RestoreStatusResponse, error)
 	DiskCreate(context.Context, *DiskCreateRequest) (*Disk, error)
 	DiskDelete(context.Context, *DiskDeleteRequest) (*empty.Empty, error)
 	DiskGet(context.Context, *DiskGetRequest) (*Disk, error)
@@ -2178,6 +3226,18 @@ func (*UnimplementedSPDKServiceServer) ReplicaRebuildingDstFinish(ctx context.Co
 func (*UnimplementedSPDKServiceServer) ReplicaRebuildingDstSnapshotCreate(ctx context.Context, req *SnapshotRequest) (*empty.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReplicaRebuildingDstSnapshotCreate not implemented")
 }
+func (*UnimplementedSPDKServiceServer) ReplicaBackupCreate(ctx context.Context, req *BackupCreateRequest) (*BackupCreateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReplicaBackupCreate not implemented")
+}
+func (*UnimplementedSPDKServiceServer) ReplicaBackupStatus(ctx context.Context, req *BackupStatusRequest) (*BackupStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReplicaBackupStatus not implemented")
+}
+func (*UnimplementedSPDKServiceServer) ReplicaBackupRestore(ctx context.Context, req *ReplicaBackupRestoreRequest) (*empty.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReplicaBackupRestore not implemented")
+}
+func (*UnimplementedSPDKServiceServer) ReplicaRestoreStatus(ctx context.Context, req *ReplicaRestoreStatusRequest) (*ReplicaRestoreStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReplicaRestoreStatus not implemented")
+}
 func (*UnimplementedSPDKServiceServer) EngineCreate(ctx context.Context, req *EngineCreateRequest) (*Engine, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineCreate not implemented")
 }
@@ -2199,11 +3259,29 @@ func (*UnimplementedSPDKServiceServer) EngineList(ctx context.Context, req *empt
 func (*UnimplementedSPDKServiceServer) EngineWatch(req *empty.Empty, srv SPDKService_EngineWatchServer) error {
 	return status.Errorf(codes.Unimplemented, "method EngineWatch not implemented")
 }
+func (*UnimplementedSPDKServiceServer) EngineReplicaList(ctx context.Context, req *EngineReplicaListRequest) (*EngineReplicaListResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineReplicaList not implemented")
+}
 func (*UnimplementedSPDKServiceServer) EngineReplicaAdd(ctx context.Context, req *EngineReplicaAddRequest) (*empty.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineReplicaAdd not implemented")
 }
 func (*UnimplementedSPDKServiceServer) EngineReplicaDelete(ctx context.Context, req *EngineReplicaDeleteRequest) (*empty.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineReplicaDelete not implemented")
+}
+func (*UnimplementedSPDKServiceServer) EngineBackupCreate(ctx context.Context, req *BackupCreateRequest) (*BackupCreateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineBackupCreate not implemented")
+}
+func (*UnimplementedSPDKServiceServer) EngineBackupStatus(ctx context.Context, req *BackupStatusRequest) (*BackupStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineBackupStatus not implemented")
+}
+func (*UnimplementedSPDKServiceServer) EngineBackupRestore(ctx context.Context, req *EngineBackupRestoreRequest) (*EngineBackupRestoreResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineBackupRestore not implemented")
+}
+func (*UnimplementedSPDKServiceServer) EngineBackupRestoreFinish(ctx context.Context, req *EngineBackupRestoreFinishRequest) (*empty.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineBackupRestoreFinish not implemented")
+}
+func (*UnimplementedSPDKServiceServer) EngineRestoreStatus(ctx context.Context, req *RestoreStatusRequest) (*RestoreStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineRestoreStatus not implemented")
 }
 func (*UnimplementedSPDKServiceServer) DiskCreate(ctx context.Context, req *DiskCreateRequest) (*Disk, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DiskCreate not implemented")
@@ -2459,6 +3537,78 @@ func _SPDKService_ReplicaRebuildingDstSnapshotCreate_Handler(srv interface{}, ct
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SPDKService_ReplicaBackupCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BackupCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).ReplicaBackupCreate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/ReplicaBackupCreate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).ReplicaBackupCreate(ctx, req.(*BackupCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_ReplicaBackupStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BackupStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).ReplicaBackupStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/ReplicaBackupStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).ReplicaBackupStatus(ctx, req.(*BackupStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_ReplicaBackupRestore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicaBackupRestoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).ReplicaBackupRestore(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/ReplicaBackupRestore",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).ReplicaBackupRestore(ctx, req.(*ReplicaBackupRestoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_ReplicaRestoreStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicaRestoreStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).ReplicaRestoreStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/ReplicaRestoreStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).ReplicaRestoreStatus(ctx, req.(*ReplicaRestoreStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SPDKService_EngineCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EngineCreateRequest)
 	if err := dec(in); err != nil {
@@ -2588,6 +3738,24 @@ func (x *sPDKServiceEngineWatchServer) Send(m *empty.Empty) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _SPDKService_EngineReplicaList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EngineReplicaListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineReplicaList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/EngineReplicaList",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineReplicaList(ctx, req.(*EngineReplicaListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SPDKService_EngineReplicaAdd_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(EngineReplicaAddRequest)
 	if err := dec(in); err != nil {
@@ -2620,6 +3788,96 @@ func _SPDKService_EngineReplicaDelete_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SPDKServiceServer).EngineReplicaDelete(ctx, req.(*EngineReplicaDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineBackupCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BackupCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineBackupCreate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/EngineBackupCreate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineBackupCreate(ctx, req.(*BackupCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineBackupStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BackupStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineBackupStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/EngineBackupStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineBackupStatus(ctx, req.(*BackupStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineBackupRestore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EngineBackupRestoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineBackupRestore(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/EngineBackupRestore",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineBackupRestore(ctx, req.(*EngineBackupRestoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineBackupRestoreFinish_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EngineBackupRestoreFinishRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineBackupRestoreFinish(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/EngineBackupRestoreFinish",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineBackupRestoreFinish(ctx, req.(*EngineBackupRestoreFinishRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineRestoreStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestoreStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineRestoreStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/spdkrpc.SPDKService/EngineRestoreStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineRestoreStatus(ctx, req.(*RestoreStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2749,6 +4007,22 @@ var _SPDKService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _SPDKService_ReplicaRebuildingDstSnapshotCreate_Handler,
 		},
 		{
+			MethodName: "ReplicaBackupCreate",
+			Handler:    _SPDKService_ReplicaBackupCreate_Handler,
+		},
+		{
+			MethodName: "ReplicaBackupStatus",
+			Handler:    _SPDKService_ReplicaBackupStatus_Handler,
+		},
+		{
+			MethodName: "ReplicaBackupRestore",
+			Handler:    _SPDKService_ReplicaBackupRestore_Handler,
+		},
+		{
+			MethodName: "ReplicaRestoreStatus",
+			Handler:    _SPDKService_ReplicaRestoreStatus_Handler,
+		},
+		{
 			MethodName: "EngineCreate",
 			Handler:    _SPDKService_EngineCreate_Handler,
 		},
@@ -2773,12 +4047,36 @@ var _SPDKService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _SPDKService_EngineList_Handler,
 		},
 		{
+			MethodName: "EngineReplicaList",
+			Handler:    _SPDKService_EngineReplicaList_Handler,
+		},
+		{
 			MethodName: "EngineReplicaAdd",
 			Handler:    _SPDKService_EngineReplicaAdd_Handler,
 		},
 		{
 			MethodName: "EngineReplicaDelete",
 			Handler:    _SPDKService_EngineReplicaDelete_Handler,
+		},
+		{
+			MethodName: "EngineBackupCreate",
+			Handler:    _SPDKService_EngineBackupCreate_Handler,
+		},
+		{
+			MethodName: "EngineBackupStatus",
+			Handler:    _SPDKService_EngineBackupStatus_Handler,
+		},
+		{
+			MethodName: "EngineBackupRestore",
+			Handler:    _SPDKService_EngineBackupRestore_Handler,
+		},
+		{
+			MethodName: "EngineBackupRestoreFinish",
+			Handler:    _SPDKService_EngineBackupRestoreFinish_Handler,
+		},
+		{
+			MethodName: "EngineRestoreStatus",
+			Handler:    _SPDKService_EngineRestoreStatus_Handler,
 		},
 		{
 			MethodName: "DiskCreate",
