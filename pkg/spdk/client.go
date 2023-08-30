@@ -188,3 +188,9 @@ func (c *SPDKClient) BdevNvmeSetOptions(ctrlrLossTimeoutSec, reconnectDelaySec, 
 	defer c.Unlock()
 	return c.client.BdevNvmeSetOptions(ctrlrLossTimeoutSec, reconnectDelaySec, fastIOFailTimeoutSec, transportAckTimeout)
 }
+
+func (c *SPDKClient) BdevLvolGetFragmap(name string, offset, size uint64) (*spdktypes.BdevLvolFragmap, error) {
+	c.Lock()
+	defer c.Unlock()
+	return c.client.BdevLvolGetFragmap(name, offset, size)
+}
