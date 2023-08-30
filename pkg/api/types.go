@@ -22,22 +22,24 @@ type Replica struct {
 }
 
 type Lvol struct {
-	Name       string          `json:"name"`
-	UUID       string          `json:"uuid"`
-	SpecSize   uint64          `json:"spec_size"`
-	ActualSize uint64          `json:"actual_size"`
-	Parent     string          `json:"parent"`
-	Children   map[string]bool `json:"children"`
+	Name         string          `json:"name"`
+	UUID         string          `json:"uuid"`
+	SpecSize     uint64          `json:"spec_size"`
+	ActualSize   uint64          `json:"actual_size"`
+	Parent       string          `json:"parent"`
+	Children     map[string]bool `json:"children"`
+	CreationTime string          `json:"creation_time"`
 }
 
 func ProtoLvolToLvol(l *spdkrpc.Lvol) *Lvol {
 	return &Lvol{
-		Name:       l.Name,
-		UUID:       l.Uuid,
-		SpecSize:   l.SpecSize,
-		ActualSize: l.ActualSize,
-		Parent:     l.Parent,
-		Children:   l.Children,
+		Name:         l.Name,
+		UUID:         l.Uuid,
+		SpecSize:     l.SpecSize,
+		ActualSize:   l.ActualSize,
+		Parent:       l.Parent,
+		Children:     l.Children,
+		CreationTime: l.CreationTime,
 	}
 }
 func ProtoReplicaToReplica(r *spdkrpc.Replica) *Replica {
