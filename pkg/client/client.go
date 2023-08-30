@@ -38,11 +38,6 @@ func (c *SPDKClient) getSPDKServiceClient() spdkrpc.SPDKServiceClient {
 	return c.service
 }
 
-type SPDKClient struct {
-	serviceURL string
-	SPDKServiceContext
-}
-
 func NewSPDKClient(serviceUrl string) (*SPDKClient, error) {
 	getSPDKServiceContext := func(serviceUrl string) (SPDKServiceContext, error) {
 		connection, err := grpc.Dial(serviceUrl, grpc.WithInsecure())
@@ -371,20 +366,20 @@ func (c *SPDKClient) EngineWatch(ctx context.Context) (*api.EngineStream, error)
 	return api.NewEngineStream(stream), nil
 }
 
-func (c *SPDKClient) EngineSnapshotCreate(name, snapshotName string) error {
+func (c *SPDKClient) EngineSnapshotCreate(name, snapshotName string) (*api.Engine, error) {
 	if name == "" || snapshotName == "" {
-		return fmt.Errorf("failed to create SPDK engine snapshot: missing required parameter name or snapshot name")
+		return nil, fmt.Errorf("failed to create SPDK engine snapshot: missing required parameter name or snapshot name")
 	}
 
 	client := c.getSPDKServiceClient()
 	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
 	defer cancel()
 
-	_, err := client.EngineSnapshotCreate(ctx, &spdkrpc.SnapshotRequest{
+	resp, err := client.EngineSnapshotCreate(ctx, &spdkrpc.SnapshotRequest{
 		Name:         name,
 		SnapshotName: snapshotName,
 	})
-	return errors.Wrapf(err, "failed to create SPDK engine %s snapshot %s", name, snapshotName)
+	return api.ProtoEngineToEngine(resp), err
 }
 
 func (c *SPDKClient) EngineSnapshotDelete(name, snapshotName string) error {
@@ -441,6 +436,132 @@ func (c *SPDKClient) EngineReplicaDelete(engineName, replicaName, replicaAddress
 		ReplicaAddress: replicaAddress,
 	})
 	return errors.Wrapf(err, "failed to delete replica %s with address %s to engine %s", replicaName, replicaAddress, engineName)
+}
+
+func (c *SPDKClient) EngineBackupCreate(req *BackupCreateRequest) (*spdkrpc.BackupCreateResponse, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.EngineBackupCreate(ctx, &spdkrpc.BackupCreateRequest{
+		SnapshotName:         req.SnapshotName,
+		BackupTarget:         req.BackupTarget,
+		VolumeName:           req.VolumeName,
+		EngineName:           req.EngineName,
+		Labels:               req.Labels,
+		Credential:           req.Credential,
+		BackingImageName:     req.BackingImageName,
+		BackingImageChecksum: req.BackingImageChecksum,
+		BackupName:           req.BackupName,
+		CompressionMethod:    req.CompressionMethod,
+		ConcurrentLimit:      req.ConcurrentLimit,
+		StorageClassName:     req.StorageClassName,
+	})
+}
+
+func (c *SPDKClient) ReplicaBackupCreate(req *BackupCreateRequest) (*spdkrpc.BackupCreateResponse, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.ReplicaBackupCreate(ctx, &spdkrpc.BackupCreateRequest{
+		BackupName:           req.BackupName,
+		SnapshotName:         req.SnapshotName,
+		BackupTarget:         req.BackupTarget,
+		VolumeName:           req.VolumeName,
+		ReplicaName:          req.ReplicaName,
+		Size:                 int64(req.Size),
+		Labels:               req.Labels,
+		Credential:           req.Credential,
+		BackingImageName:     req.BackingImageName,
+		BackingImageChecksum: req.BackingImageChecksum,
+		CompressionMethod:    req.CompressionMethod,
+		ConcurrentLimit:      req.ConcurrentLimit,
+		StorageClassName:     req.StorageClassName,
+	})
+}
+
+func (c *SPDKClient) EngineBackupStatus(backupName, engineName, replicaAddress string) (*spdkrpc.BackupStatusResponse, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.EngineBackupStatus(ctx, &spdkrpc.BackupStatusRequest{
+		Backup:         backupName,
+		EngineName:     engineName,
+		ReplicaAddress: replicaAddress,
+	})
+}
+
+func (c *SPDKClient) ReplicaBackupStatus(backupName string) (*spdkrpc.BackupStatusResponse, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.ReplicaBackupStatus(ctx, &spdkrpc.BackupStatusRequest{
+		Backup: backupName,
+	})
+}
+
+func (c *SPDKClient) EngineBackupRestore(req *BackupRestoreRequest) (*spdkrpc.EngineBackupRestoreResponse, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.EngineBackupRestore(ctx, &spdkrpc.EngineBackupRestoreRequest{
+		BackupUrl:       req.BackupUrl,
+		EngineName:      req.EngineName,
+		SnapshotName:    req.SnapshotName,
+		Credential:      req.Credential,
+		ConcurrentLimit: req.ConcurrentLimit,
+	})
+}
+
+func (c *SPDKClient) ReplicaBackupRestore(req *BackupRestoreRequest) error {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.ReplicaBackupRestore(ctx, &spdkrpc.ReplicaBackupRestoreRequest{
+		BackupUrl:       req.BackupUrl,
+		ReplicaName:     req.ReplicaName,
+		SnapshotName:    req.SnapshotName,
+		Credential:      req.Credential,
+		ConcurrentLimit: req.ConcurrentLimit,
+	})
+	return err
+}
+
+func (c *SPDKClient) EngineBackupRestoreFinish(engineName string) error {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.EngineBackupRestoreFinish(ctx, &spdkrpc.EngineBackupRestoreFinishRequest{
+		EngineName: engineName,
+	})
+
+	return err
+}
+
+func (c *SPDKClient) EngineRestoreStatus(engineName string) (*spdkrpc.RestoreStatusResponse, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.EngineRestoreStatus(ctx, &spdkrpc.RestoreStatusRequest{
+		EngineName: engineName,
+	})
+}
+
+func (c *SPDKClient) ReplicaRestoreStatus(replicaName string) (*spdkrpc.ReplicaRestoreStatusResponse, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	return client.ReplicaRestoreStatus(ctx, &spdkrpc.ReplicaRestoreStatusRequest{
+		ReplicaName: replicaName,
+	})
 }
 
 // DiskCreate creates a disk with the given name and path.
