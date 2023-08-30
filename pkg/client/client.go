@@ -503,18 +503,19 @@ func (c *SPDKClient) ReplicaBackupStatus(backupName string) (*spdkrpc.BackupStat
 	})
 }
 
-func (c *SPDKClient) EngineBackupRestore(req *BackupRestoreRequest) (*spdkrpc.EngineBackupRestoreResponse, error) {
+func (c *SPDKClient) EngineBackupRestore(req *BackupRestoreRequest) error {
 	client := c.getSPDKServiceClient()
 	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
 	defer cancel()
 
-	return client.EngineBackupRestore(ctx, &spdkrpc.EngineBackupRestoreRequest{
+	_, err := client.EngineBackupRestore(ctx, &spdkrpc.EngineBackupRestoreRequest{
 		BackupUrl:       req.BackupUrl,
 		EngineName:      req.EngineName,
 		SnapshotName:    req.SnapshotName,
 		Credential:      req.Credential,
 		ConcurrentLimit: req.ConcurrentLimit,
 	})
+	return err
 }
 
 func (c *SPDKClient) ReplicaBackupRestore(req *BackupRestoreRequest) error {
