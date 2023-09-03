@@ -20,6 +20,7 @@ import (
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
 
+	"github.com/longhorn/longhorn-spdk-engine/pkg/api"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/types"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/util"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/util/broadcaster"
@@ -687,6 +688,31 @@ func (s *Server) EngineReplicaAdd(ctx context.Context, req *spdkrpc.EngineReplic
 	}
 
 	return &empty.Empty{}, nil
+}
+
+func (s *Server) EngineReplicaList(ctx context.Context, req *spdkrpc.EngineReplicaListRequest) (ret *spdkrpc.EngineReplicaListResponse, err error) {
+	s.RLock()
+	e := s.engineMap[req.EngineName]
+	s.RUnlock()
+
+	if e == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica list", req.EngineName)
+	}
+
+	replicas, err := e.ReplicaList(s.spdkClient)
+	if err != nil {
+		return nil, err
+	}
+
+	ret = &spdkrpc.EngineReplicaListResponse{
+		Replicas: map[string]*spdkrpc.Replica{},
+	}
+
+	for _, r := range replicas {
+		ret.Replicas[r.Name] = api.ReplicaToProtoReplica(r)
+	}
+
+	return ret, nil
 }
 
 func (s *Server) EngineReplicaDelete(ctx context.Context, req *spdkrpc.EngineReplicaDeleteRequest) (ret *empty.Empty, err error) {

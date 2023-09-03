@@ -403,6 +403,20 @@ func (c *SPDKClient) EngineReplicaAdd(engineName, replicaName, replicaAddress st
 	return errors.Wrapf(err, "failed to add replica %s with address %s to engine %s", replicaName, replicaAddress, engineName)
 }
 
+func (c *SPDKClient) EngineReplicaList(engineName string) (*spdkrpc.EngineReplicaListResponse, error) {
+	if engineName == "" {
+		return nil, fmt.Errorf("failed to list replica for SPDK engine: missing required parameter engine name")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceLongTimeout)
+	defer cancel()
+
+	return client.EngineReplicaList(ctx, &spdkrpc.EngineReplicaListRequest{
+		EngineName: engineName,
+	})
+}
+
 func (c *SPDKClient) EngineReplicaDelete(engineName, replicaName, replicaAddress string) error {
 	if engineName == "" {
 		return fmt.Errorf("failed to delete replica from SPDK engine: missing required parameter engine name")
