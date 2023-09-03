@@ -791,6 +791,31 @@ func (e *Engine) ReplicaDelete(spdkClient *SPDKClient, replicaName, replicaAddre
 	return nil
 }
 
+func (e *Engine) ReplicaList(spdkClient *SPDKClient) (ret map[string]*api.Replica, err error) {
+	e.Lock()
+	defer e.Unlock()
+
+	replicas := map[string]*api.Replica{}
+
+	for name, address := range e.ReplicaAddressMap {
+		replicaServiceCli, err := GetServiceClient(address)
+		if err != nil {
+			e.log.WithError(err).Errorf("Failed to get service client for replica %s with address %s", name, address)
+			continue
+		}
+
+		replica, err := replicaServiceCli.ReplicaGet(name)
+		if err != nil {
+			e.log.WithError(err).Errorf("Failed to get replica %s with address %s", name, address)
+			continue
+		}
+
+		replicas[name] = replica
+	}
+
+	return replicas, nil
+}
+
 const SnapshotOperationCreate = "snapshot-create"
 const SnapshotOperationDelete = "snapshot-delete"
 
