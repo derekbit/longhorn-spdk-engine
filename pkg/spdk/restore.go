@@ -71,18 +71,34 @@ func NewRestore(spdkClient *SPDKClient, lvolName, backupUrl, backupName string, 
 	}, nil
 }
 
-func (status *Restore) DeepCopy() *Restore {
-	status.RLock()
-	defer status.RUnlock()
+func (r *Restore) StartNewRestore(backupUrl, currentRestoringBackup, lvolName string, validLastRestoredBackup bool) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.LvolName = lvolName
+
+	r.Progress = 0
+	r.Error = ""
+	r.BackupURL = backupUrl
+	r.State = btypes.ProgressStateInProgress
+	if !validLastRestoredBackup {
+		r.LastRestored = ""
+	}
+	r.CurrentRestoringBackup = currentRestoringBackup
+}
+
+func (r *Restore) DeepCopy() *Restore {
+	r.RLock()
+	defer r.RUnlock()
 
 	return &Restore{
-		LvolName:               status.LvolName,
-		LastRestored:           status.LastRestored,
-		BackupURL:              status.BackupURL,
-		CurrentRestoringBackup: status.CurrentRestoringBackup,
-		State:                  status.State,
-		Error:                  status.Error,
-		Progress:               status.Progress,
+		LvolName:               r.LvolName,
+		LastRestored:           r.LastRestored,
+		BackupURL:              r.BackupURL,
+		CurrentRestoringBackup: r.CurrentRestoringBackup,
+		State:                  r.State,
+		Error:                  r.Error,
+		Progress:               r.Progress,
 	}
 }
 
@@ -181,12 +197,6 @@ func (r *Restore) FinishRestore() {
 		r.CurrentRestoringBackup = ""
 	}
 }
-
-/*
-func (status *Restore) StartNewRestore(backupURL, currentRestoringBackup, toLvolName, snapshotDiskName string, validLastRestoredBackup bool) {
-
-}
-*/
 
 /*
 func (status *RestoreStatus) Revert(previousStatus *RestoreStatus) {

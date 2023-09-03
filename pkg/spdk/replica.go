@@ -1135,14 +1135,15 @@ func (r *Replica) BackupRestore(spdkClient *SPDKClient, backupUrl, snapshotName 
 			return errors.Wrapf(err, "failed to start new restore")
 		}
 	} else {
-		// var toLvolName string
-		// validLastRestoredBackup := s.canDoIncrementalRestore(restore, backupURL, requestedBackupName)
-		// if validLastRestoredBackup {
-		// 	toLvolName = diskutil.GenerateDeltaFileName(restore.LastRestored)
-		// } else {
-		// 	toLvolName = diskutil.GenerateSnapTempFileName(snapshotDiskName)
-		// }
-		// r.restore.StartNewRestore(backupURL, requestedBackupName, toLvolName, snapshotDiskName, validLastRestoredBackup)
+		var lvolName string
+
+		validLastRestoredBackup := r.canDoIncrementalRestore(restore, backupUrl, backupName)
+		if validLastRestoredBackup {
+			lvolName = GetReplicaSnapshotLvolName(r.Name, restore.LastRestored)
+		} else {
+			lvolName = GetReplicaSnapshotLvolName(r.Name, snapshotName)
+		}
+		r.restore.StartNewRestore(backupUrl, backupName, lvolName, validLastRestoredBackup)
 	}
 
 	// Initiate restore
@@ -1160,16 +1161,25 @@ func (r *Replica) BackupRestore(spdkClient *SPDKClient, backupUrl, snapshotName 
 		}
 		r.log.Infof("Successfully initiated full restore for %v to %v", backupUrl, newRestore.LvolName)
 	} else {
-		// if err := DoBackupRestoreIncrementally(backupUrl, newRestore.ToLvolName, newRestore.LastRestored, concurrentLimit, r.restore); err != nil {
-		// 	return nil, errors.Wrapf(err, "error initiating incremental backup restore")
-		// }
-		// r.log.Infof("Successfully initiated incremental restore for %v to [%v]", backupUrl, newRestore.ToLvolName)
+		return fmt.Errorf("incremental restore is not supported yet")
 	}
 
 	go r.completeBackupRestore(spdkClient)
 
 	return nil
 
+}
+
+func (r *Replica) canDoIncrementalRestore(restore *Restore, backupURL, requestedBackupName string) bool {
+	if restore.LastRestored == "" {
+		logrus.Warnf("There is a restore record in the server but last restored backup is empty with restore state is %v, will do full restore instead", restore.State)
+		return false
+	}
+	if _, err := backupstore.InspectBackup(strings.Replace(backupURL, requestedBackupName, restore.LastRestored, 1)); err != nil {
+		logrus.WithError(err).Warnf("The last restored backup %v becomes invalid for incremental restore, will do full restore instead", restore.LastRestored)
+		return false
+	}
+	return true
 }
 
 func (r *Replica) completeBackupRestore(spdkClient *SPDKClient) (err error) {
@@ -1187,9 +1197,7 @@ func (r *Replica) completeBackupRestore(spdkClient *SPDKClient) (err error) {
 	restore := r.restore.DeepCopy()
 	r.RUnlock()
 
-	// if restoreStatus.LastRestored != "" {
-	// 	return r.postIncrementalRestoreOperations(restoreStatus)
-	// }
+	// TODO: Support postIncrementalRestoreOperations
 
 	return r.postFullRestoreOperations(spdkClient, restore)
 }
