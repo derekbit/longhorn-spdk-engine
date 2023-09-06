@@ -3,26 +3,15 @@ package client
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 
 	"github.com/longhorn/longhorn-spdk-engine/pkg/api"
+	"github.com/longhorn/longhorn-spdk-engine/pkg/util"
 	"github.com/longhorn/longhorn-spdk-engine/proto/spdkrpc"
 )
-
-const (
-	GRPCServiceTimeout     = 3 * time.Minute
-	GRPCServiceMedTimeout  = 24 * time.Hour
-	GRPCServiceLongTimeout = 72 * time.Hour
-)
-
-type SPDKServiceContext struct {
-	cc      *grpc.ClientConn
-	service spdkrpc.SPDKServiceClient
-}
 
 func (c *SPDKServiceContext) Close() error {
 	if c.cc != nil {
@@ -522,14 +511,28 @@ func (c *SPDKClient) EngineBackupRestore(req *BackupRestoreRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
 	defer cancel()
 
-	_, err := client.EngineBackupRestore(ctx, &spdkrpc.EngineBackupRestoreRequest{
+	recv, err := client.EngineBackupRestore(ctx, &spdkrpc.EngineBackupRestoreRequest{
 		BackupUrl:       req.BackupUrl,
 		EngineName:      req.EngineName,
 		SnapshotName:    req.SnapshotName,
 		Credential:      req.Credential,
 		ConcurrentLimit: req.ConcurrentLimit,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	if len(recv.Errors) == 0 {
+		return nil
+	}
+
+	taskErr := util.NewTaskError()
+	for replicaAddress, replicaErr := range recv.Errors {
+		replicaURL := "tcp://" + replicaAddress
+		taskErr.Append(util.NewReplicaError(replicaURL, errors.New(replicaErr)))
+	}
+
+	return taskErr
 }
 
 func (c *SPDKClient) ReplicaBackupRestore(req *BackupRestoreRequest) error {

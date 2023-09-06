@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
@@ -81,4 +82,108 @@ func StartSPDKTgtDaemon() error {
 	}
 
 	return nil
+}
+
+func ParseLabels(labels []string) (map[string]string, error) {
+	result := map[string]string{}
+	for _, label := range labels {
+		kv := strings.SplitN(label, "=", 2)
+		if len(kv) != 2 {
+			return nil, fmt.Errorf("invalid label not in <key>=<value> format %v", label)
+		}
+		key := kv[0]
+		value := kv[1]
+		if errList := IsQualifiedName(key); len(errList) > 0 {
+			return nil, fmt.Errorf("invalid key %v for label: %v", key, errList[0])
+		}
+		// We don't need to validate the Label value since we're allowing for any form of data to be stored, similar
+		// to Kubernetes Annotations. Of course, we should make sure it isn't empty.
+		if value == "" {
+			return nil, fmt.Errorf("invalid empty value for label with key %v", key)
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
+func Now() string {
+	return time.Now().UTC().Format(time.RFC3339)
+}
+
+func UnescapeURL(url string) string {
+	// Deal with escape in url inputted from bash
+	result := strings.Replace(url, "\\u0026", "&", 1)
+	result = strings.Replace(result, "u0026", "&", 1)
+	result = strings.TrimLeft(result, "\"'")
+	result = strings.TrimRight(result, "\"'")
+	return result
+}
+
+func CombineErrors(errorList ...error) (retErr error) {
+	for _, err := range errorList {
+		if err != nil {
+			if retErr != nil {
+				retErr = fmt.Errorf("%v, %v", retErr, err)
+			} else {
+				retErr = err
+			}
+		}
+	}
+	return retErr
+}
+
+func Min(x, y uint64) uint64 {
+	if x < y {
+		return x
+	}
+	return y
+}
+
+type ReplicaError struct {
+	Address string
+	Message string
+}
+
+func NewReplicaError(address string, err error) ReplicaError {
+	return ReplicaError{
+		Address: address,
+		Message: err.Error(),
+	}
+}
+
+func (e ReplicaError) Error() string {
+	return fmt.Sprintf("%v: %v", e.Address, e.Message)
+}
+
+type TaskError struct {
+	ReplicaErrors []ReplicaError
+}
+
+func NewTaskError(res ...ReplicaError) *TaskError {
+	return &TaskError{
+		ReplicaErrors: append([]ReplicaError{}, res...),
+	}
+}
+
+func (t *TaskError) Error() string {
+	var errs []string
+	for _, re := range t.ReplicaErrors {
+		errs = append(errs, re.Error())
+	}
+
+	if errs == nil {
+		return "Unknown"
+	}
+	if len(errs) == 1 {
+		return errs[0]
+	}
+	return strings.Join(errs, "; ")
+}
+
+func (t *TaskError) Append(re ReplicaError) {
+	t.ReplicaErrors = append(t.ReplicaErrors, re)
+}
+
+func (t *TaskError) HasError() bool {
+	return len(t.ReplicaErrors) != 0
 }

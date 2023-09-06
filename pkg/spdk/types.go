@@ -19,6 +19,11 @@ const (
 	RebuildingSnapshotNamePrefix = "rebuild"
 )
 
+// Restore
+const (
+	PeriodicRefreshIntervalInSeconds = 2
+)
+
 func GetReplicaSnapshotLvolNamePrefix(replicaName string) string {
 	return fmt.Sprintf("%s-snap-", replicaName)
 }
@@ -53,4 +58,10 @@ func GetServiceClient(address string) (*client.SPDKClient, error) {
 
 	// TODO: Can we share the clients in the whole server?
 	return client.NewSPDKClient(addr)
+}
+
+type BackupCreateInfo struct {
+	BackupName     string
+	IsIncremental  bool
+	ReplicaAddress string
 }
