@@ -25,7 +25,7 @@ RUN zypper -n addrepo --refresh https://download.opensuse.org/repositories/syste
 RUN zypper -n install kmod curl fuse wget tar gzip unzip git awk gcc \
     libibverbs librdmacm1 rdma-core-devel perl-Config-General libaio-devel sg3_utils uuid-devel \
     iputils telnet iproute2 qemu-tools \
-    e2fsprogs e2fsprogs-devel xfsprogs xfsprogs-devel util-linux-systemd python3-devel python3-pip meson ninja
+    e2fsprogs e2fsprogs-devel xfsprogs xfsprogs-devel util-linux-systemd python3-devel python3-pip meson ninja libjson-c-devel
 
 
 # Install Go & tools

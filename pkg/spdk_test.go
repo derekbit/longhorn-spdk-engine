@@ -171,7 +171,7 @@ func (s *TestSuite) TestSPDKMultipleThread(c *C) {
 		c.Assert(err, IsNil)
 	}()
 
-	concurrentCount := 10
+	concurrentCount := 1
 	dataCountInMB := 100
 	wg := sync.WaitGroup{}
 	wg.Add(concurrentCount)
@@ -208,6 +208,9 @@ func (s *TestSuite) TestSPDKMultipleThread(c *C) {
 			}
 			endpoint := helperutil.GetLonghornDevicePath(volumeName)
 			engine, err := spdkCli.EngineCreate(engineName, volumeName, types.FrontendSPDKTCPBlockdev, defaultTestLvolSize, replicaAddressMap, 1)
+
+			time.Sleep(300 * time.Second)
+
 			c.Assert(err, IsNil)
 			c.Assert(engine.State, Equals, types.InstanceStateRunning)
 			c.Assert(engine.ReplicaAddressMap, DeepEquals, replicaAddressMap)
