@@ -17,12 +17,14 @@ service SPDKService {
     rpc ReplicaSnapshotShallowCopy(ReplicaSnapshotShallowCopyRequest) returns (google.protobuf.Empty);
     rpc ReplicaRebuildingDstStart(ReplicaRebuildingDstStartRequest) returns (ReplicaRebuildingDstStartResponse) {}
     rpc ReplicaRebuildingDstFinish(ReplicaRebuildingDstFinishRequest) returns (google.protobuf.Empty) {}
-    rpc ReplicaRebuildingDstSnapshotCreate(SnapshotRequest) returns (google.protobuf.Empty);
+    rpc ReplicaRebuildingDstSnapshotCreate(SnapshotRequest) returns (google.protobuf.Empty) {}
 
 
     rpc EngineCreate(EngineCreateRequest) returns (Engine);
     rpc EngineDelete(EngineDeleteRequest) returns (google.protobuf.Empty);
     rpc EngineGet(EngineGetRequest) returns (Engine);
+    rpc EngineSuspend(EngineSuspendRequest) returns (google.protobuf.Empty);
+    rpc EngineResume(EngineResumeRequest) returns (google.protobuf.Empty);
     rpc EngineSnapshotCreate(SnapshotRequest) returns (Engine);
     rpc EngineSnapshotDelete(SnapshotRequest) returns (google.protobuf.Empty);
     rpc EngineList(google.protobuf.Empty) returns (EngineListResponse);
@@ -147,6 +149,14 @@ message EngineDeleteRequest {
 }
 
 message EngineGetRequest {
+    string name = 1;
+}
+
+message EngineSuspendRequest {
+    string name = 1;
+}
+
+message EngineResumeRequest {
     string name = 1;
 }
 

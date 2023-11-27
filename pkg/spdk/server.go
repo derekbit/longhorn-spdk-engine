@@ -560,6 +560,26 @@ func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequ
 	return e.Create(s.spdkClient, req.ReplicaAddressMap, s.getLocalReplicaLvsNameMap(req.ReplicaAddressMap), req.PortCount, s.portAllocator)
 }
 
+func (s *Server) EngineSuspend(ctx context.Context, req *spdkrpc.EngineSuspendRequest) (err error) {
+	if req.Name == "" {
+		return grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	}
+
+	logrus.Infof("Debig =======> EngineSuspend: %v", req.Name)
+
+	return nil
+}
+
+func (s *Server) EngineResume(ctx context.Context, req *spdkrpc.EngineResumeRequest) (err error) {
+	if req.Name == "" {
+		return grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	}
+
+	logrus.Infof("Debig =======> EngineResume: %v", req.Name)
+
+	return nil
+}
+
 func (s *Server) getLocalReplicaLvsNameMap(replicaMap map[string]string) (replicaLvsNameMap map[string]string) {
 	replicaLvsNameMap = map[string]string{}
 	for replicaName := range replicaMap {

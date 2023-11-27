@@ -344,6 +344,42 @@ func (c *SPDKClient) EngineGet(name string) (*api.Engine, error) {
 	return api.ProtoEngineToEngine(resp), nil
 }
 
+func (c *SPDKClient) EngineSuspend(name string) error {
+	if name == "" {
+		return fmt.Errorf("failed to suspend SPDK engine: missing required parameter")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.EngineSuspend(ctx, &spdkrpc.EngineSuspendRequest{
+		Name: name,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to suspend SPDK engine %v", name)
+	}
+	return nil
+}
+
+func (c *SPDKClient) EngineResume(name string) error {
+	if name == "" {
+		return fmt.Errorf("failed to resume SPDK engine: missing required parameter")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.EngineResume(ctx, &spdkrpc.EngineResumeRequest{
+		Name: name,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to resume SPDK engine %v", name)
+	}
+	return nil
+}
+
 func (c *SPDKClient) EngineList() (map[string]*api.Engine, error) {
 	client := c.getSPDKServiceClient()
 	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
