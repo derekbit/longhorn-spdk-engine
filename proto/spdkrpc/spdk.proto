@@ -142,6 +142,7 @@ message EngineCreateRequest {
     map<string, string> replica_address_map = 4;
     string frontend = 5;
     int32 port_count = 6;
+    bool suspended = 7;
 }
 
 message EngineDeleteRequest {
