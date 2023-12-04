@@ -23,6 +23,7 @@ service SPDKService {
     rpc EngineCreate(EngineCreateRequest) returns (Engine);
     rpc EngineDelete(EngineDeleteRequest) returns (google.protobuf.Empty);
     rpc EngineGet(EngineGetRequest) returns (Engine);
+    rpc EngineSuspend(EngineSuspendRequest) returns (google.protobuf.Empty);
     rpc EngineSnapshotCreate(SnapshotRequest) returns (Engine);
     rpc EngineSnapshotDelete(SnapshotRequest) returns (google.protobuf.Empty);
     rpc EngineList(google.protobuf.Empty) returns (EngineListResponse);
@@ -140,6 +141,7 @@ message EngineCreateRequest {
     map<string, string> replica_address_map = 4;
     string frontend = 5;
     int32 port_count = 6;
+    bool engine_upgrade = 7;
 }
 
 message EngineDeleteRequest {
@@ -147,6 +149,10 @@ message EngineDeleteRequest {
 }
 
 message EngineGetRequest {
+    string name = 1;
+}
+
+message EngineSuspendRequest {
     string name = 1;
 }
 
