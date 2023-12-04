@@ -7,8 +7,8 @@ github.com/c9s/goprocinfo v0.0.0-20170724085704-0010a05ce49f/go.mod h1:uEyr4WpAH
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/derekbit/go-spdk-helper v0.0.0-20231204105326-01de1f352ebc h1:FWYHfcOH9wxdj28sd0wJtkwXaRoUAhdRs5BpUQET9SU=
-github.com/derekbit/go-spdk-helper v0.0.0-20231204105326-01de1f352ebc/go.mod h1:PCawMRVllTJnjbIYIC8axRfEI7aEhhjbsoBS/Y/EUYQ=
+github.com/derekbit/go-spdk-helper v0.0.0-20231204123714-4ffb6ce4aaa6 h1:qiJerOg0gMH2MkbolO86EbUHiN2vMXszSOeC2eQIeVM=
+github.com/derekbit/go-spdk-helper v0.0.0-20231204123714-4ffb6ce4aaa6/go.mod h1:PCawMRVllTJnjbIYIC8axRfEI7aEhhjbsoBS/Y/EUYQ=
 github.com/golang/protobuf v1.5.0/go.mod h1:FsONVRAS9T7sI+LIUmWTfcYkHO4aIWwzhcaSAoJOfIk=
 github.com/golang/protobuf v1.5.2 h1:ROPKBNFfQgOUMifHyP+KYbvpjbdoFNs+aK7DXlji0Tw=
 github.com/golang/protobuf v1.5.2/go.mod h1:XVQd3VNwM+JqD3oG2Ue2ip4fOMUkwXdXDdiuN0vRsmY=
