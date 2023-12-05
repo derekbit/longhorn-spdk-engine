@@ -1,6 +1,6 @@
 module github.com/longhorn/longhorn-spdk-engine
 
-go 1.17
+go 1.21
 
 require (
 	github.com/RoaringBitmap/roaring v1.2.3
@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/longhorn/go-spdk-helper v0.0.0-20231002161457-6c31a95f76e8
 	github.com/pkg/errors v0.9.1
-	github.com/sirupsen/logrus v1.8.1
+	github.com/sirupsen/logrus v1.9.0
 	golang.org/x/net v0.7.0
 	google.golang.org/grpc v1.53.0
 	google.golang.org/protobuf v1.28.1
@@ -28,4 +28,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/longhorn/go-spdk-helper v0.0.0-20231002161457-6c31a95f76e8 => github.com/derekbit/go-spdk-helper v0.0.0-20231103105654-1a22ce12efdc
+replace github.com/longhorn/go-spdk-helper v0.0.0-20231002161457-6c31a95f76e8 => github.com/derekbit/go-spdk-helper v0.0.0-20231205085627-ae890d8bf120
