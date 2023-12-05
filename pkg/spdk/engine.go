@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
@@ -73,7 +74,7 @@ func NewEngine(engineName, volumeName, frontend string, specSize uint64, engineU
 	}
 }
 
-func (e *Engine) Create(spdkClient *SPDKClient, replicaAddressMap, localReplicaLvsNameMap map[string]string, portCount int32, superiorPortAllocator *util.Bitmap) (ret *spdkrpc.Engine, err error) {
+func (e *Engine) Create(spdkClient *SPDKClient, replicaAddressMap, localReplicaLvsNameMap map[string]string, portCount int32, upgradeRequired bool, superiorPortAllocator *util.Bitmap) (ret *spdkrpc.Engine, err error) {
 	requireUpdate := true
 
 	e.Lock()
@@ -122,7 +123,7 @@ func (e *Engine) Create(spdkClient *SPDKClient, replicaAddressMap, localReplicaL
 		return nil, err
 	}
 
-	if err := e.handleFrontend(spdkClient, portCount, superiorPortAllocator); err != nil {
+	if err := e.handleFrontend(spdkClient, portCount, upgradeRequired, superiorPortAllocator); err != nil {
 		return nil, err
 	}
 
@@ -155,7 +156,7 @@ func getBdevNameForReplica(spdkClient *SPDKClient, localReplicaLvsNameMap map[st
 	return nvmeBdevNameList[0], nil
 }
 
-func (e *Engine) handleFrontend(spdkClient *SPDKClient, portCount int32, superiorPortAllocator *util.Bitmap) error {
+func (e *Engine) handleFrontend(spdkClient *SPDKClient, portCount int32, upgradeRequired bool, superiorPortAllocator *util.Bitmap) error {
 	if e.Frontend != types.FrontendEmpty && e.Frontend != types.FrontendSPDKTCPNvmf && e.Frontend != types.FrontendSPDKTCPBlockdev {
 		return fmt.Errorf("unknown frontend type %s", e.Frontend)
 	}
@@ -184,7 +185,7 @@ func (e *Engine) handleFrontend(spdkClient *SPDKClient, portCount int32, superio
 	if err != nil {
 		return err
 	}
-	return initiator.Start(e.IP, strconv.Itoa(int(port)))
+	return initiator.Start(e.IP, strconv.Itoa(int(port)), upgradeRequired)
 }
 
 func (e *Engine) Delete(spdkClient *SPDKClient, superiorPortAllocator *util.Bitmap) (err error) {
@@ -209,7 +210,8 @@ func (e *Engine) Delete(spdkClient *SPDKClient, superiorPortAllocator *util.Bitm
 		if err != nil {
 			return err
 		}
-		if err := initiator.Stop(); err != nil {
+
+		if err := initiator.Stop(true); err != nil {
 			return err
 		}
 
@@ -879,4 +881,79 @@ func (e *Engine) SetErrorState() {
 		e.State = types.InstanceStateError
 		needUpdate = true
 	}
+}
+
+func (e *Engine) Suspend(spdkClient *SPDKClient, superiorPortAllocator *util.Bitmap) (err error) {
+	requireUpdate := true
+
+	e.Lock()
+	defer func() {
+		e.Unlock()
+
+		if requireUpdate {
+			e.UpdateCh <- nil
+		}
+	}()
+
+	defer func() {
+		if err != nil && e.State != types.InstanceStateError {
+			e.State = types.InstanceStateError
+			e.log.WithError(err).Info("Failed to suspend engine, will mark the engine as error")
+		}
+	}()
+
+	nqn := helpertypes.GetNQN(e.Name)
+
+	initiator, err := nvme.NewInitiator(e.VolumeName, nqn, nvme.HostProc)
+	if err != nil {
+		return err
+	}
+
+	if err := initiator.Suspend(); err != nil {
+		return err
+	}
+
+	e.log.Infof("Stopping initiator for upgrading engine %s", e.Name)
+	if err := initiator.Stop(false); err != nil {
+		return errors.Wrap(err, "failed to stop initiator for upgrading engine")
+	}
+
+	e.log.Infof("Stopping expose bdev for upgrading engine %s", e.Name)
+	if err := spdkClient.StopExposeBdev(nqn); err != nil {
+		return errors.Wrap(err, "failed to stop expose bdev for upgrading engine")
+	}
+
+	if e.Port != 0 {
+		if err := superiorPortAllocator.ReleaseRange(e.Port, e.Port); err != nil {
+			return errors.Wrapf(err, "failed to release port %d for upgrading engine", e.Port)
+		}
+		e.Port = 0
+		requireUpdate = true
+	}
+
+	e.log.Infof("Deleting raid bdev %s for upgrading engine %s", e.Name)
+	if _, err := spdkClient.BdevRaidDelete(e.Name); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
+		return errors.Wrap(err, "failed to delete raid bdev for upgrading engine")
+	}
+
+	for replicaName := range e.ReplicaAddressMap {
+		if err := e.removeReplica(spdkClient, replicaName); err != nil {
+			if e.ReplicaModeMap[replicaName] != types.ModeERR {
+				e.ReplicaModeMap[replicaName] = types.ModeERR
+				requireUpdate = true
+			}
+			return err
+		}
+
+		delete(e.ReplicaAddressMap, replicaName)
+		delete(e.ReplicaBdevNameMap, replicaName)
+		delete(e.ReplicaModeMap, replicaName)
+		requireUpdate = true
+	}
+
+	e.State = types.InstanceStateSuspended
+
+	e.log.Infof("Suspended engine")
+
+	return nil
 }

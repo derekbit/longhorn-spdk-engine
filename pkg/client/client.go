@@ -287,7 +287,7 @@ func (c *SPDKClient) ReplicaRebuildingDstSnapshotCreate(name, snapshotName strin
 	return errors.Wrapf(err, "failed to create dst SPDK replica %s rebuilding snapshot %s", name, snapshotName)
 }
 
-func (c *SPDKClient) EngineCreate(name, volumeName, frontend string, specSize uint64, replicaAddressMap map[string]string, portCount int32) (*api.Engine, error) {
+func (c *SPDKClient) EngineCreate(name, volumeName, frontend string, specSize uint64, replicaAddressMap map[string]string, portCount int32, upgradeRequired bool) (*api.Engine, error) {
 	if name == "" || volumeName == "" || len(replicaAddressMap) == 0 {
 		return nil, fmt.Errorf("failed to start SPDK engine: missing required parameters")
 	}
@@ -303,6 +303,7 @@ func (c *SPDKClient) EngineCreate(name, volumeName, frontend string, specSize ui
 		ReplicaAddressMap: replicaAddressMap,
 		Frontend:          frontend,
 		PortCount:         portCount,
+		UpgradeRequired:   upgradeRequired,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to start SPDK engine")
@@ -342,6 +343,24 @@ func (c *SPDKClient) EngineGet(name string) (*api.Engine, error) {
 		return nil, errors.Wrapf(err, "failed to get SPDK engine %v", name)
 	}
 	return api.ProtoEngineToEngine(resp), nil
+}
+
+func (c *SPDKClient) EngineSuspend(name string) error {
+	if name == "" {
+		return fmt.Errorf("failed to suspend SPDK engine: missing required parameter")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.EngineSuspend(ctx, &spdkrpc.EngineSuspendRequest{
+		Name: name,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to suspend SPDK engine %v", name)
+	}
+	return nil
 }
 
 func (c *SPDKClient) EngineList() (map[string]*api.Engine, error) {
