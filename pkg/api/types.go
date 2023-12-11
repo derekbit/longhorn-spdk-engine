@@ -19,27 +19,43 @@ type Replica struct {
 	PortStart  int32            `json:"port_start"`
 	PortEnd    int32            `json:"port_end"`
 	State      string           `json:"state"`
+	Rebuilding bool             `json:"rebuilding"`
 }
 
 type Lvol struct {
-	Name       string          `json:"name"`
-	UUID       string          `json:"uuid"`
-	SpecSize   uint64          `json:"spec_size"`
-	ActualSize uint64          `json:"actual_size"`
-	Parent     string          `json:"parent"`
-	Children   map[string]bool `json:"children"`
+	Name         string          `json:"name"`
+	UUID         string          `json:"uuid"`
+	SpecSize     uint64          `json:"spec_size"`
+	ActualSize   uint64          `json:"actual_size"`
+	Parent       string          `json:"parent"`
+	Children     map[string]bool `json:"children"`
+	CreationTime string          `json:"creation_time"`
 }
 
 func ProtoLvolToLvol(l *spdkrpc.Lvol) *Lvol {
 	return &Lvol{
-		Name:       l.Name,
-		UUID:       l.Uuid,
-		SpecSize:   l.SpecSize,
-		ActualSize: l.ActualSize,
-		Parent:     l.Parent,
-		Children:   l.Children,
+		Name:         l.Name,
+		UUID:         l.Uuid,
+		SpecSize:     l.SpecSize,
+		ActualSize:   l.ActualSize,
+		Parent:       l.Parent,
+		Children:     l.Children,
+		CreationTime: l.CreationTime,
 	}
 }
+
+func LvolToProtoLvol(l *Lvol) *spdkrpc.Lvol {
+	return &spdkrpc.Lvol{
+		Name:         l.Name,
+		Uuid:         l.UUID,
+		SpecSize:     l.SpecSize,
+		ActualSize:   l.ActualSize,
+		Parent:       l.Parent,
+		Children:     l.Children,
+		CreationTime: l.CreationTime,
+	}
+}
+
 func ProtoReplicaToReplica(r *spdkrpc.Replica) *Replica {
 	res := &Replica{
 		Name:       r.Name,
@@ -53,12 +69,35 @@ func ProtoReplicaToReplica(r *spdkrpc.Replica) *Replica {
 		PortStart:  r.PortStart,
 		PortEnd:    r.PortEnd,
 		State:      r.State,
+		Rebuilding: r.Rebuilding,
 	}
 	for snapName, snapProtoLvol := range r.Snapshots {
 		res.Snapshots[snapName] = ProtoLvolToLvol(snapProtoLvol)
 	}
 
 	return res
+}
+
+func ReplicaToProtoReplica(r *Replica) *spdkrpc.Replica {
+	snapshots := map[string]*spdkrpc.Lvol{}
+	for name, snapshot := range r.Snapshots {
+		snapshots[name] = LvolToProtoLvol(snapshot)
+	}
+
+	return &spdkrpc.Replica{
+		Name:       r.Name,
+		Uuid:       r.UUID,
+		LvsName:    r.LvsName,
+		LvsUuid:    r.LvsUUID,
+		SpecSize:   r.SpecSize,
+		ActualSize: r.ActualSize,
+		Ip:         r.IP,
+		PortStart:  r.PortStart,
+		PortEnd:    r.PortEnd,
+		Snapshots:  snapshots,
+		State:      r.State,
+		Rebuilding: r.Rebuilding,
+	}
 }
 
 type Engine struct {
