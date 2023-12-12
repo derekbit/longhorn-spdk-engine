@@ -12,7 +12,6 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	go.uber.org/multierr v1.11.0
 	golang.org/x/net v0.7.0
-	golang.org/x/sys v0.11.0
 	google.golang.org/grpc v1.53.0
 	google.golang.org/protobuf v1.28.1
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
@@ -26,6 +25,9 @@ require (
 	github.com/longhorn/nsfilelock v0.0.0-20200723175406-fa7c83ad0003 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	golang.org/x/sys v0.11.0 // indirect
 	golang.org/x/text v0.7.0 // indirect
 	google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f // indirect
 )
+
+replace github.com/longhorn/go-spdk-helper v0.0.0-20231212033123-3b72caa5a1ea => github.com/derekbit/go-spdk-helper v0.0.0-20231212081804-7b9490b98ebf

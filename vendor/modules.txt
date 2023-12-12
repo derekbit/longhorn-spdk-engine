@@ -30,7 +30,7 @@ github.com/kr/text
 ## explicit; go 1.21
 github.com/longhorn/go-common-libs/proc
 github.com/longhorn/go-common-libs/types
-# github.com/longhorn/go-spdk-helper v0.0.0-20231212033123-3b72caa5a1ea
+# github.com/longhorn/go-spdk-helper v0.0.0-20231212033123-3b72caa5a1ea => github.com/derekbit/go-spdk-helper v0.0.0-20231212081804-7b9490b98ebf
 ## explicit; go 1.21
 github.com/longhorn/go-spdk-helper/pkg/jsonrpc
 github.com/longhorn/go-spdk-helper/pkg/nvme
