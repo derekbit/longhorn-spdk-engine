@@ -37,7 +37,8 @@ type Engine struct {
 	Frontend           string
 	Endpoint           string
 
-	State types.InstanceState
+	State    types.InstanceState
+	ErrorMsg string
 
 	// UpdateCh should not be protected by the engine lock
 	UpdateCh chan interface{}
@@ -93,8 +94,15 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap, localR
 	}
 
 	defer func() {
-		if err != nil && e.State != types.InstanceStateError {
-			e.State = types.InstanceStateError
+		if err != nil {
+			e.log.WithError(err).Errorf("Failed to create engine %s", e.Name)
+			if e.State != types.InstanceStateError {
+				e.State = types.InstanceStateError
+			}
+			e.ErrorMsg = err.Error()
+
+			ret = e.getWithoutLock()
+			err = nil
 		}
 	}()
 
@@ -308,6 +316,7 @@ func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
 		Frontend:          e.Frontend,
 		Endpoint:          e.Endpoint,
 		State:             string(e.State),
+		ErrorMsg:          e.ErrorMsg,
 	}
 
 	for replicaName, replicaMode := range e.ReplicaModeMap {

@@ -47,7 +47,9 @@ type Replica struct {
 	PortStart int32
 	PortEnd   int32
 
-	State     types.InstanceState
+	State    types.InstanceState
+	ErrorMsg string
+
 	IsExposed bool
 
 	isRebuilding   bool
@@ -90,6 +92,7 @@ func ServiceReplicaToProtoReplica(r *Replica) *spdkrpc.Replica {
 		PortStart: r.PortStart,
 		PortEnd:   r.PortEnd,
 		State:     string(r.State),
+		ErrorMsg:  r.ErrorMsg,
 	}
 	// spdkrpc.Replica.Snapshots is map[<snapshot name>] rather than map[<snapshot lvol name>]
 	for name, lvol := range r.SnapshotMap {
@@ -493,8 +496,15 @@ func (r *Replica) Create(spdkClient *spdkclient.Client, exposeRequired bool, por
 	}
 
 	defer func() {
-		if err != nil && r.State != types.InstanceStateError {
-			r.State = types.InstanceStateError
+		if err != nil {
+			r.log.WithError(err).Errorf("Failed to create replica %s", r.Name)
+			if r.State != types.InstanceStateError {
+				r.State = types.InstanceStateError
+			}
+			r.ErrorMsg = err.Error()
+
+			ret = ServiceReplicaToProtoReplica(r)
+			err = nil
 		}
 	}()
 
