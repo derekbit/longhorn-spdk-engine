@@ -60,6 +60,7 @@ message Replica {
     map<string, Lvol> snapshots = 10;
     bool rebuilding = 11;
     string state = 12;
+    string error_msg = 13;
 }
 
 message ReplicaCreateRequest {
@@ -132,6 +133,7 @@ message Engine {
     string frontend = 9;
     string endpoint = 10;
     string state = 11;
+    string error_msg = 12;
 }
 
 message EngineCreateRequest {
