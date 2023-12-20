@@ -12,6 +12,8 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	nslib "github.com/longhorn/go-common-libs/ns"
+	typeslib "github.com/longhorn/go-common-libs/types"
 	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
@@ -158,7 +160,12 @@ func getDiskPath(path string) string {
 }
 
 func getDiskID(filename string) (string, error) {
-	executor := spdkutil.NewTimeoutExecutor(spdkutil.CmdTimeout)
+	namespaces := []typeslib.Namespace{typeslib.NamespaceMnt, typeslib.NamespaceIpc, typeslib.NamespaceNet}
+	executor, err := nslib.NewNamespaceExecutor(typeslib.ProcessNone, typeslib.ProcDirectory, namespaces)
+	if err != nil {
+		return "", err
+	}
+
 	dev, err := spdkutil.DetectDevice(filename, executor)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to detect disk device")
