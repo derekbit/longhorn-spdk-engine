@@ -6,7 +6,7 @@ require (
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/google/uuid v1.3.0
 	github.com/longhorn/go-common-libs v0.0.0-20231207171057-cd5fff99e604
-	github.com/longhorn/go-spdk-helper v0.0.0-20231220143453-a8b2cc3d83d0
+	github.com/longhorn/go-spdk-helper v0.0.0-20231222092128-dd4eb991eecb
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	go.uber.org/multierr v1.11.0
