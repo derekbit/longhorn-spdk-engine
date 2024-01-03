@@ -37,15 +37,16 @@ type Replica struct {
 	// SnapshotMap map[<snapshot name>]. <snapshot name> is a caller provided name and does not contain prefix `<replica name>-snap-`
 	SnapshotMap map[string]*Lvol
 
-	Name      string
-	UUID      string
-	Alias     string
-	LvsName   string
-	LvsUUID   string
-	SpecSize  uint64
-	IP        string
-	PortStart int32
-	PortEnd   int32
+	Name       string
+	UUID       string
+	Alias      string
+	LvsName    string
+	LvsUUID    string
+	SpecSize   uint64
+	ActualSize uint64
+	IP         string
+	PortStart  int32
+	PortEnd    int32
 
 	State    types.InstanceState
 	ErrorMsg string
@@ -82,17 +83,18 @@ type Lvol struct {
 
 func ServiceReplicaToProtoReplica(r *Replica) *spdkrpc.Replica {
 	res := &spdkrpc.Replica{
-		Name:      r.Name,
-		Uuid:      r.UUID,
-		LvsName:   r.LvsName,
-		LvsUuid:   r.LvsUUID,
-		SpecSize:  r.SpecSize,
-		Snapshots: map[string]*spdkrpc.Lvol{},
-		Ip:        r.IP,
-		PortStart: r.PortStart,
-		PortEnd:   r.PortEnd,
-		State:     string(r.State),
-		ErrorMsg:  r.ErrorMsg,
+		Name:       r.Name,
+		Uuid:       r.UUID,
+		LvsName:    r.LvsName,
+		LvsUuid:    r.LvsUUID,
+		SpecSize:   r.SpecSize,
+		ActualSize: r.ActualSize,
+		Snapshots:  map[string]*spdkrpc.Lvol{},
+		Ip:         r.IP,
+		PortStart:  r.PortStart,
+		PortEnd:    r.PortEnd,
+		State:      string(r.State),
+		ErrorMsg:   r.ErrorMsg,
 	}
 	// spdkrpc.Replica.Snapshots is map[<snapshot name>] rather than map[<snapshot lvol name>]
 	for name, lvol := range r.SnapshotMap {
@@ -121,17 +123,18 @@ func ServiceLvolToProtoLvol(lvol *Lvol) *spdkrpc.Lvol {
 
 func BdevLvolInfoToServiceLvol(bdev *spdktypes.BdevInfo) *Lvol {
 	return &Lvol{
-		Name:     spdktypes.GetLvolNameFromAlias(bdev.Aliases[0]),
-		Alias:    bdev.Aliases[0],
-		UUID:     bdev.UUID,
-		SpecSize: bdev.NumBlocks * uint64(bdev.BlockSize),
-		Parent:   bdev.DriverSpecific.Lvol.BaseSnapshot,
+		Name:       spdktypes.GetLvolNameFromAlias(bdev.Aliases[0]),
+		Alias:      bdev.Aliases[0],
+		UUID:       bdev.UUID,
+		SpecSize:   bdev.NumBlocks * uint64(bdev.BlockSize),
+		ActualSize: bdev.DriverSpecific.Lvol.NumAllocatedClusters * defaultClusterSize,
+		Parent:     bdev.DriverSpecific.Lvol.BaseSnapshot,
 		// Need to update this separately
 		Children: map[string]*Lvol{},
 	}
 }
 
-func NewReplica(ctx context.Context, replicaName, lvsName, lvsUUID string, specSize uint64, updateCh chan interface{}) *Replica {
+func NewReplica(ctx context.Context, replicaName, lvsName, lvsUUID string, specSize, actualSize uint64, updateCh chan interface{}) *Replica {
 	log := logrus.StandardLogger().WithFields(logrus.Fields{
 		"replicaName": replicaName,
 		"lvsName":     lvsName,
@@ -150,10 +153,11 @@ func NewReplica(ctx context.Context, replicaName, lvsName, lvsUUID string, specS
 		ActiveChain: []*Lvol{
 			nil,
 			{
-				Name:     replicaName,
-				Alias:    spdktypes.GetLvolAlias(lvsName, replicaName),
-				SpecSize: roundedSpecSize,
-				Children: map[string]*Lvol{},
+				Name:       replicaName,
+				Alias:      spdktypes.GetLvolAlias(lvsName, replicaName),
+				SpecSize:   roundedSpecSize,
+				ActualSize: actualSize,
+				Children:   map[string]*Lvol{},
 			},
 		},
 		ChainLength: 2,
@@ -163,6 +167,7 @@ func NewReplica(ctx context.Context, replicaName, lvsName, lvsUUID string, specS
 		LvsName:     lvsName,
 		LvsUUID:     lvsUUID,
 		SpecSize:    roundedSpecSize,
+		ActualSize:  actualSize,
 		State:       types.InstanceStatePending,
 
 		UpdateCh: updateCh,
