@@ -160,7 +160,7 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap, localR
 		return nil, err
 	}
 
-	e.log.Info("Launching Frontend during engine creation")
+	e.log.WithField("upgradeRequired", upgradeRequired).Info("Launching frontend during engine creation")
 	if err := e.handleFrontend(spdkClient, portCount, superiorPortAllocator, upgradeRequired); err != nil {
 		return nil, err
 	}
@@ -249,10 +249,12 @@ func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, portCount int32, 
 	if err != nil {
 		return err
 	}
-	dmDeviceBusy, err := initiator.Start(e.IP, portStr, true)
+
+	dmDeviceBusy, err := initiator.Start(e.IP, portStr, upgradeRequired)
 	if err != nil {
 		return err
 	}
+
 	e.dmDeviceBusy = dmDeviceBusy
 	e.Endpoint = initiator.GetEndpoint()
 	e.log = e.log.WithField("endpoint", e.Endpoint)
