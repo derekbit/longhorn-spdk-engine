@@ -1,6 +1,8 @@
 module github.com/longhorn/longhorn-spdk-engine
 
-go 1.22
+go 1.22.0
+
+toolchain go1.22.2
 
 require (
 	github.com/0xPolygon/polygon-edge v1.3.2
@@ -54,3 +56,7 @@ require (
 	k8s.io/mount-utils v0.30.0 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
 )
+
+replace github.com/longhorn/go-spdk-helper v0.0.0-20240422131908-185e91a748ad => github.com/derekbit/go-spdk-helper v0.0.0-20240426150552-cc8ae612cae5
+
+replace github.com/longhorn/types v0.0.0-20240417112740-a0d8514936b8 => github.com/derekbit/longhorn-types v0.0.0-20240420062442-035497cf812f
