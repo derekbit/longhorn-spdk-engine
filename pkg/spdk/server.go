@@ -709,7 +709,7 @@ func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequ
 	replicaLvsNameMap := s.getLocalReplicaLvsNameMap(req.ReplicaAddressMap)
 	s.Unlock()
 
-	return e.Create(spdkClient, req.ReplicaAddressMap, replicaLvsNameMap, req.PortCount, s.portAllocator, req.UpgradeRequired)
+	return e.Create(spdkClient, req.ReplicaAddressMap, replicaLvsNameMap, req.PortCount, s.portAllocator, req.EntityType, req.TargetAddress, req.UpgradeRequired)
 }
 
 func (s *Server) getLocalReplicaLvsNameMap(replicaMap map[string]string) (replicaLvsNameMap map[string]string) {

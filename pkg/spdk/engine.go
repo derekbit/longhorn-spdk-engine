@@ -43,6 +43,7 @@ type Engine struct {
 	Port               int32
 	Frontend           string
 	Endpoint           string
+	Nqn                string
 
 	dmDeviceBusy bool
 
@@ -93,7 +94,8 @@ func NewEngine(engineName, volumeName, frontend string, specSize uint64, engineU
 }
 
 func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap, localReplicaLvsNameMap map[string]string,
-	portCount int32, superiorPortAllocator *util.Bitmap, upgradeRequired bool) (ret *spdkrpc.Engine, err error) {
+	portCount int32, superiorPortAllocator *util.Bitmap, entityType spdkrpc.EntityType, targetAddress string, upgradeRequired bool) (ret *spdkrpc.Engine, err error) {
+
 	e.log.Infof("Creating engine with replicas %+v", replicaAddressMap)
 
 	requireUpdate := true
@@ -133,36 +135,64 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap, localR
 	if err != nil {
 		return nil, err
 	}
+
 	e.IP = podIP
+	e.Nqn = helpertypes.GetNQN(e.Name)
 	e.log = e.log.WithField("ip", podIP)
 
-	replicaBdevList := []string{}
-	for replicaName, replicaAddr := range replicaAddressMap {
-		bdevName, err := e.getBdevNameForReplica(spdkClient, localReplicaLvsNameMap, replicaName, replicaAddr, podIP)
-		if err != nil {
-			e.log.WithError(err).Errorf("Failed to get bdev from replica %s with address %s, will skip it and continue", replicaName, replicaAddr)
-			e.ReplicaModeMap[replicaName] = types.ModeERR
-			e.ReplicaBdevNameMap[replicaName] = ""
-			continue
+	if entityType == spdkrpc.EntityType_ENGINE_TYPE_ALL || entityType == spdkrpc.EntityType_ENGINE_TYPE_TARGET {
+		replicaBdevList := []string{}
+		for replicaName, replicaAddr := range replicaAddressMap {
+			bdevName, err := e.getBdevNameForReplica(spdkClient, localReplicaLvsNameMap, replicaName, replicaAddr, podIP)
+			if err != nil {
+				e.log.WithError(err).Errorf("Failed to get bdev from replica %s with address %s, will skip it and continue", replicaName, replicaAddr)
+				e.ReplicaModeMap[replicaName] = types.ModeERR
+				e.ReplicaBdevNameMap[replicaName] = ""
+				continue
+			}
+			// TODO: Check if a replica is really a RW replica rather than a rebuilding failed replica
+			e.ReplicaModeMap[replicaName] = types.ModeRW
+			e.ReplicaBdevNameMap[replicaName] = bdevName
+			replicaBdevList = append(replicaBdevList, bdevName)
 		}
-		// TODO: Check if a replica is really a RW replica rather than a rebuilding failed replica
-		e.ReplicaModeMap[replicaName] = types.ModeRW
-		e.ReplicaBdevNameMap[replicaName] = bdevName
-		replicaBdevList = append(replicaBdevList, bdevName)
+		e.ReplicaAddressMap = replicaAddressMap
+		e.log = e.log.WithField("replicaAddressMap", replicaAddressMap)
+
+		e.CheckAndUpdateInfoFromReplica()
+
+		e.log.Info("Launching RAID during engine creation")
+		if _, err := spdkClient.BdevRaidCreate(e.Name, spdktypes.BdevRaidLevel1, 0, replicaBdevList); err != nil {
+			return nil, err
+		}
+
+		if e.Frontend == types.FrontendSPDKTCPNvmf || e.Frontend == types.FrontendSPDKTCPBlockdev {
+			e.log.Info("Blindly stopping expose bdev for engine")
+			if err := spdkClient.StopExposeBdev(e.Nqn); err != nil {
+				return nil, errors.Wrap(err, "failed to stop expose bdev for engine")
+			}
+
+			port, _, err := superiorPortAllocator.AllocateRange(portCount)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to allocate %v port for engine %s", portCount, e.Name)
+			}
+			portStr := strconv.Itoa(int(port))
+
+			if err := spdkClient.StartExposeBdev(e.Nqn, e.Name, e.IP, portStr); err != nil {
+				return nil, errors.Wrapf(err, "failed to start expose bdev for engine %s", e.Name)
+			}
+
+			e.Port = port
+			e.log = e.log.WithField("port", port)
+		}
 	}
-	e.ReplicaAddressMap = replicaAddressMap
-	e.log = e.log.WithField("replicaAddressMap", replicaAddressMap)
 
-	e.CheckAndUpdateInfoFromReplica()
-
-	e.log.Info("Launching RAID during engine creation")
-	if _, err := spdkClient.BdevRaidCreate(e.Name, spdktypes.BdevRaidLevel1, 0, replicaBdevList); err != nil {
-		return nil, err
-	}
-
-	e.log.WithField("upgradeRequired", upgradeRequired).Info("Launching frontend during engine creation")
-	if err := e.handleFrontend(spdkClient, portCount, superiorPortAllocator, upgradeRequired); err != nil {
-		return nil, err
+	if entityType == spdkrpc.EntityType_ENGINE_TYPE_ALL || entityType == spdkrpc.EntityType_ENGINE_TYPE_TARGET {
+		if e.Frontend == types.FrontendSPDKTCPNvmf && e.Frontend == types.FrontendSPDKTCPBlockdev {
+			e.log.WithField("upgradeRequired", upgradeRequired).Info("Launching frontend during engine creation")
+			if err := e.handleFrontend(upgradeRequired); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	e.State = types.InstanceStateRunning
@@ -211,46 +241,18 @@ func (e *Engine) connectReplica(spdkClient *spdkclient.Client, replicaName, repl
 	return nvmeBdevNameList[0], nil
 }
 
-func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, portCount int32, superiorPortAllocator *util.Bitmap, upgradeRequired bool) error {
-	if e.Frontend != types.FrontendEmpty && e.Frontend != types.FrontendSPDKTCPNvmf && e.Frontend != types.FrontendSPDKTCPBlockdev {
-		return fmt.Errorf("unknown frontend type %s", e.Frontend)
-	}
-
-	if e.Frontend == types.FrontendEmpty {
-		e.log.Infof("No frontend specified, will not expose the volume %s", e.VolumeName)
-		return nil
-	}
-
-	nqn := helpertypes.GetNQN(e.Name)
-
-	e.log.Info("Blindly stopping expose bdev for engine")
-	if err := spdkClient.StopExposeBdev(nqn); err != nil {
-		return errors.Wrap(err, "failed to stop expose bdev for engine")
-	}
-
-	port, _, err := superiorPortAllocator.AllocateRange(portCount)
-	if err != nil {
-		return err
-	}
-	portStr := strconv.Itoa(int(port))
-
-	if err := spdkClient.StartExposeBdev(nqn, e.Name, e.IP, portStr); err != nil {
-		return err
-	}
-	e.Port = port
-	e.log = e.log.WithField("port", port)
-
+func (e *Engine) handleFrontend(upgradeRequired bool) error {
 	if e.Frontend == types.FrontendSPDKTCPNvmf {
-		e.Endpoint = GetNvmfEndpoint(nqn, e.IP, e.Port)
+		e.Endpoint = GetNvmfEndpoint(e.Nqn, e.IP, e.Port)
 		return nil
 	}
 
-	initiator, err := nvme.NewInitiator(e.VolumeName, nqn, nvme.HostProc)
+	initiator, err := nvme.NewInitiator(e.VolumeName, e.Nqn, nvme.HostProc)
 	if err != nil {
 		return err
 	}
 
-	dmDeviceBusy, err := initiator.Start(e.IP, portStr, upgradeRequired)
+	dmDeviceBusy, err := initiator.Start(e.IP, strconv.Itoa(int(e.Port)), upgradeRequired)
 	if err != nil {
 		return err
 	}
