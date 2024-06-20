@@ -1,7 +1,9 @@
 package spdk
 
 import (
+	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -48,4 +50,12 @@ func exposeSnapshotLvolBdev(spdkClient *spdkclient.Client, lvsName, lvolName, ip
 		}
 	}
 	return subsystemNQN, controllerName, nil
+}
+
+func splitHostPort(address string) (host, port string, err error) {
+	if strings.Contains(address, ":") {
+		return net.SplitHostPort(address)
+	}
+
+	return address, "", nil
 }

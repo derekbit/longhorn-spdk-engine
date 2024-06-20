@@ -1633,6 +1633,7 @@ func (r *Replica) BackupRestore(spdkClient *spdkclient.Client, backupUrl, snapsh
 	defer func() {
 		if err != nil { // nolint:staticcheck
 			// TODO: Support snapshot revert for incremental restore
+			r.log.WithError(err).Error("Failed to start backup restore")
 		}
 	}()
 
@@ -1647,8 +1648,8 @@ func (r *Replica) BackupRestore(spdkClient *spdkclient.Client, backupUrl, snapsh
 	}
 
 	go func() {
-		if completeErr := r.completeBackupRestore(spdkClient); completeErr != nil {
-			logrus.WithError(completeErr).Warn("Failed to complete backup restore")
+		if err := r.completeBackupRestore(spdkClient); err != nil {
+			logrus.WithError(err).Warn("Failed to complete backup restore")
 		}
 	}()
 
