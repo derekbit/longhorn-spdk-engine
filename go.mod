@@ -9,15 +9,15 @@ require (
 	github.com/RoaringBitmap/roaring v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/longhorn/backupstore v0.0.0-20240509144945-3bce6e69af15
-	github.com/longhorn/go-common-libs v0.0.0-20240514074907-351459694cbf
+	github.com/longhorn/go-common-libs v0.0.0-20240616051056-103c7d62a0d5
 	github.com/longhorn/go-spdk-helper v0.0.0-20240514082311-4069f4804017
-	github.com/longhorn/types v0.0.0-20240510221052-ab949bbedea3
+	github.com/longhorn/types v0.0.0-20240612122407-553c71ad6514
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	go.uber.org/multierr v1.11.0
 	golang.org/x/net v0.25.0
-	google.golang.org/grpc v1.63.2
-	google.golang.org/protobuf v1.34.1
+	google.golang.org/grpc v1.64.0
+	google.golang.org/protobuf v1.34.2
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	k8s.io/apimachinery v0.30.0
 )
@@ -45,13 +45,17 @@ require (
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
-	github.com/shirou/gopsutil/v3 v3.24.4 // indirect
+	github.com/shirou/gopsutil/v3 v3.24.5 // indirect
 	github.com/slok/goresilience v0.2.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/sys v0.20.0 // indirect
+	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/text v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240429193739-8cf5692501f6 // indirect
 	k8s.io/klog/v2 v2.120.1 // indirect
-	k8s.io/mount-utils v0.30.0 // indirect
+	k8s.io/mount-utils v0.30.2 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
 )
+
+replace github.com/longhorn/types v0.0.0-20240510221052-ab949bbedea3 => github.com/derekbit/longhorn-types v0.0.0-20240619120948-1919c0a00aed
+
+replace github.com/longhorn/go-spdk-helper v0.0.0-20240514082311-4069f4804017 => github.com/derekbit/go-spdk-helper v0.0.0-20240620012717-2b83180ae259
