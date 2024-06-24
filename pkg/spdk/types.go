@@ -25,6 +25,9 @@ const (
 	SyncTimeout = 60 * time.Minute
 
 	nvmeNguidLength = 32
+
+	maxNumRetries = 15
+	retryInterval = 1 * time.Second
 )
 
 func GetReplicaSnapshotLvolNamePrefix(replicaName string) string {
