@@ -34,18 +34,19 @@ import (
 type Engine struct {
 	sync.RWMutex
 
-	Name       string
-	VolumeName string
-	SpecSize   uint64
-	ActualSize uint64
-	IP         string
-	Port       int32
-	TargetIP   string
-	TargetPort int32
-	Frontend   string
-	Endpoint   string
-	Nqn        string
-	Nguid      string
+	Name              string
+	VolumeName        string
+	SpecSize          uint64
+	ActualSize        uint64
+	IP                string
+	Port              int32 // Port that initiator is connecting to
+	TargetIP          string
+	TargetPort        int32 // Port of the target that is used for letting initiator connect to
+	StandbyTargetPort int32
+	Frontend          string
+	Endpoint          string
+	Nqn               string
+	Nguid             string
 
 	// TODO: Use a single map to store all replica info
 	ReplicaAddressMap  map[string]string
@@ -102,6 +103,10 @@ func NewEngine(engineName, volumeName, frontend string, specSize uint64, engineU
 	}
 }
 
+func isNewEngine(e *Engine) bool {
+	return e.IP == ""
+}
+
 func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[string]string, portCount int32, superiorPortAllocator *commonbitmap.Bitmap, initiatorAddress, targetAddress string, upgradeRequired bool) (ret *spdkrpc.Engine, err error) {
 	logrus.WithFields(logrus.Fields{
 		"portCount":         portCount,
@@ -116,7 +121,6 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 	e.Lock()
 	defer func() {
 		e.Unlock()
-
 		if requireUpdate {
 			e.UpdateCh <- nil
 		}
@@ -131,6 +135,7 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to split initiator address %v", initiatorAddress)
 	}
+
 	targetIP, _, err := splitHostPort(targetAddress)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to split target address %v", targetAddress)
@@ -165,29 +170,50 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 
 	replicaBdevList := []string{}
 
-	initiatorCreationRequired := true
-	if !upgradeRequired {
-		if e.IP == "" {
-			if initiatorIP != targetIP {
-				// For creating target on another node
-				initiatorCreationRequired = false
-				e.log.Info("Creating an target engine")
-				e.TargetIP = podIP
-			} else {
-				// For newly creating engine
-				e.log.Info("Creating an new engine")
-				e.IP = podIP
-				e.TargetIP = podIP
-			}
+	initiatorCreationRequired := false
+	targetCreationRequired := false
 
-			e.log = e.log.WithField("ip", e.IP)
+	if podIP == initiatorIP && podIP == targetIP {
+		if e.Port == 0 && e.TargetPort == 0 {
+			e.log.Info("Creating both initiator and target instances")
+			initiatorCreationRequired = true
+			targetCreationRequired = true
+		} else if e.Port != 0 && e.TargetPort == 0 {
+			e.log.Info("Creating a target instance")
+			targetCreationRequired = true
+			if e.StandbyTargetPort != 0 {
+				if e.StandbyTargetPort != 0 {
+					e.log.Warnf("Standby target instance with port %v is already created, will skip the target creation", e.StandbyTargetPort)
+					return e.getWithoutLock(), nil
+				}
+			}
 		} else {
-			if initiatorIP != targetIP {
-				return nil, errors.Errorf("unsupported operation: engine ip=%v, initiator address=%v, target address=%v", e.IP, initiatorAddress, targetAddress)
-			}
+			return nil, fmt.Errorf("invalid initiator and target address for engine %s creation", e.Name)
+		}
+	} else if podIP == initiatorIP {
+		e.log.Info("Creating an initiator instance")
+		initiatorCreationRequired = true
+	} else if podIP == targetIP {
+		e.log.Info("Creating a target instance")
+		targetCreationRequired = true
+	} else {
+		return nil, fmt.Errorf("invalid initiator and target address for engine %s creation", e.Name)
+	}
 
-			// For creating target on attached node
-			initiatorCreationRequired = false
+	if isNewEngine(e) {
+		e.IP = initiatorIP
+		e.TargetIP = targetIP
+	}
+
+	e.log = e.log.WithFields(logrus.Fields{
+		"initiatorIP": e.IP,
+		"targetIP":    e.TargetIP,
+	})
+
+	if targetCreationRequired {
+		_, err := spdkClient.BdevRaidGet(e.Name, 0)
+		if err != nil {
+
 		}
 
 		for replicaName, replicaAddr := range replicaAddressMap {
@@ -208,18 +234,15 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 
 		e.checkAndUpdateInfoFromReplicaNoLock()
 
-		e.log.Infof("Connected all available replicas %+v, then launching raid during engine creation", e.ReplicaModeMap)
+		// TODO: improve the log message
+		e.log.Infof("Connecting all available replicas %+v, then launching raid during engine creation", e.ReplicaModeMap)
 		if _, err := spdkClient.BdevRaidCreate(e.Name, spdktypes.BdevRaidLevel1, 0, replicaBdevList); err != nil {
 			return nil, err
 		}
 	} else {
-		// For reconstructing engine after switching over target to another node
-		initiatorCreationRequired = false
+		e.log.Info("Skipping target creation during engine creation")
 
-		e.IP = targetIP
-
-		// Get ReplicaModeMap and ReplicaBdevNameMap
-		targetSPDKServiceAddress := net.JoinHostPort(e.IP, strconv.Itoa(types.SPDKServicePort))
+		targetSPDKServiceAddress := net.JoinHostPort(e.TargetIP, strconv.Itoa(types.SPDKServicePort))
 		targetSPDKClient, err := GetServiceClient(targetSPDKServiceAddress)
 		if err != nil {
 			return nil, err
@@ -230,18 +253,14 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 			}
 		}()
 
-		var engineWithTarget *api.Engine
-		if initiatorIP != targetIP {
-			engineWithTarget, err = targetSPDKClient.EngineGet(e.Name)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to get engine %v from %v", e.Name, targetAddress)
-			}
-		} else {
-			engineWithTarget = api.ProtoEngineToEngine(e.getWithoutLock())
+		e.log.Info("Fetching replica list from target engine")
+		targetEngine, err := targetSPDKClient.EngineGet(e.Name)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get engine %v from %v", e.Name, targetAddress)
 		}
 
 		for replicaName, replicaAddr := range replicaAddressMap {
-			_, ok := engineWithTarget.ReplicaAddressMap[replicaName]
+			_, ok := targetEngine.ReplicaAddressMap[replicaName]
 			if !ok {
 				e.log.WithError(err).Warnf("Failed to get bdev from replica %s with address %s, will mark the mode from %v to ERR and continue", replicaName, replicaAddr, e.ReplicaModeMap[replicaName])
 				e.ReplicaModeMap[replicaName] = types.ModeERR
@@ -256,11 +275,19 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 
 		e.ReplicaAddressMap = replicaAddressMap
 		e.log = e.log.WithField("replicaAddressMap", replicaAddressMap)
-		e.log.Infof("Re-connected all available replicas %+v for engine reconstruction during upgrade", e.ReplicaModeMap)
+		e.log.Infof("Connected all available replicas %+v for engine reconstruction during upgrade", e.ReplicaModeMap)
 	}
 
-	e.log.Info("Launching frontend during engine creation")
-	if err := e.handleFrontend(spdkClient, portCount, superiorPortAllocator, initiatorCreationRequired, upgradeRequired, initiatorAddress, targetAddress); err != nil {
+	log := e.log.WithFields(logrus.Fields{
+		"initiatorCreationRequired": initiatorCreationRequired,
+		"targetCreationRequired":    targetCreationRequired,
+		"upgradeRequired":           upgradeRequired,
+		"initiatorAddress":          initiatorAddress,
+		"targetAddress":             targetAddress,
+	})
+
+	log.Info("Handling frontend during engine creation")
+	if err := e.handleFrontend(spdkClient, superiorPortAllocator, portCount, targetAddress, initiatorCreationRequired, targetCreationRequired); err != nil {
 		return nil, err
 	}
 
@@ -271,7 +298,8 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 	return e.getWithoutLock(), nil
 }
 
-func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, portCount int32, superiorPortAllocator *commonbitmap.Bitmap, initiatorCreationRequired, upgradeRequired bool, initiatorAddress, targetAddress string) (err error) {
+func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, portCount int32, targetAddress string,
+	initiatorCreationRequired, targetCreationRequired bool) (err error) {
 	if !types.IsFrontendSupported(e.Frontend) {
 		return fmt.Errorf("unknown frontend type %s", e.Frontend)
 	}
@@ -281,9 +309,9 @@ func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, portCount int32, 
 		return nil
 	}
 
-	initiatorIP, _, err := splitHostPort(initiatorAddress)
-	if err != nil {
-		return errors.Wrapf(err, "failed to split initiator address %v", initiatorAddress)
+	standbyTargetCreationRequired := false
+	if e.Port != 0 && e.TargetPort == 0 {
+		standbyTargetCreationRequired = true
 	}
 
 	targetIP, targetPort, err := splitHostPort(targetAddress)
@@ -292,34 +320,87 @@ func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, portCount int32, 
 	}
 
 	e.Nqn = helpertypes.GetNQN(e.Name)
+	e.Nguid = commonutils.RandomID(nvmeNguidLength)
 
-	var port int32
-	if !upgradeRequired {
-		e.Nguid = commonutils.RandomID(nvmeNguidLength)
+	dmDeviceBusy := false
+	port := int32(0)
+	initiator, err := nvme.NewInitiator(e.VolumeName, e.Nqn, nvme.HostProc)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create initiator for engine %v", e.Name)
+	}
 
-		e.log.Info("Blindly stopping expose bdev for engine")
-		if err := spdkClient.StopExposeBdev(e.Nqn); err != nil {
-			return errors.Wrapf(err, "failed to blindly stop expose bdev for engine %v", e.Name)
+	defer func() {
+		if err == nil {
+			if !standbyTargetCreationRequired {
+				e.initiator = initiator
+				e.dmDeviceBusy = dmDeviceBusy
+				e.Endpoint = initiator.GetEndpoint()
+				e.log = e.log.WithFields(logrus.Fields{
+					"endpoint":   e.Endpoint,
+					"port":       e.Port,
+					"targetPort": e.TargetPort,
+				})
+			}
+
+			e.log.Infof("Finished handling frontend for engine: %+v", e)
+		}
+	}()
+
+	if initiatorCreationRequired && !targetCreationRequired {
+		initiator.TransportAddress = targetIP
+		initiator.TransportServiceID = strconv.Itoa(int(targetPort))
+
+		e.log.Infof("Target instance already exists on %v, no need to create target instance", targetAddress)
+		e.Port = targetPort
+
+		// TODO:
+		// "nvme list -o json" might be empty devices for a while instance manager pod is just started.
+		// The root cause is not clear, so we need to retry to load NVMe device info.
+		for r := 0; r < maxNumRetries; r++ {
+			err = initiator.LoadNVMeDeviceInfo(initiator.TransportAddress, initiator.TransportServiceID, initiator.SubsystemNQN)
+			if err != nil && strings.Contains(err.Error(), "failed to get devices") {
+				time.Sleep(retryInterval)
+				continue
+			}
+			if err == nil {
+				e.log.Infof("Loaded NVMe device info for engine")
+				break
+			}
+			return errors.Wrapf(err, "failed to load NVMe device info for engine %v", e.Name)
 		}
 
-		port, _, err = superiorPortAllocator.AllocateRange(portCount)
+		err = initiator.LoadEndpoint(false)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to load endpoint for engine %v", e.Name)
 		}
 
-		e.log.Infof("Allocated port %v", port)
-		if err := spdkClient.StartExposeBdev(e.Nqn, e.Name, e.Nguid, targetIP, strconv.Itoa(int(port))); err != nil {
-			return err
-		}
+		return nil
+	}
 
-		if initiatorCreationRequired {
-			e.Port = port
-			e.TargetPort = port
+	e.log.Info("Blindly stopping expose bdev for engine")
+	if err := spdkClient.StopExposeBdev(e.Nqn); err != nil {
+		return errors.Wrapf(err, "failed to blindly stop expose bdev for engine %v", e.Name)
+	}
+
+	port, _, err = superiorPortAllocator.AllocateRange(portCount)
+	if err != nil {
+		return errors.Wrapf(err, "failed to allocate port for engine %v", e.Name)
+	}
+	e.log.Infof("Allocated port %v for engine", port)
+
+	if initiatorCreationRequired {
+		e.Port = port
+	}
+	if targetCreationRequired {
+		if standbyTargetCreationRequired {
+			e.StandbyTargetPort = port
 		} else {
 			e.TargetPort = port
 		}
-	} else {
-		e.Port = targetPort
+	}
+
+	if err := spdkClient.StartExposeBdev(e.Nqn, e.Name, e.Nguid, targetIP, strconv.Itoa(int(port))); err != nil {
+		return err
 	}
 
 	if e.Frontend == types.FrontendSPDKTCPNvmf {
@@ -327,50 +408,17 @@ func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, portCount int32, 
 		return nil
 	}
 
-	if initiatorIP != targetIP && !upgradeRequired {
-		e.log.Infof("Initiator IP %v is different from target IP %s, will not start initiator for engine", initiatorIP, targetIP)
+	if !initiatorCreationRequired && targetCreationRequired {
+		e.log.Infof("Only creating target instance for engine, no need to start initiator")
 		return nil
 	}
 
-	initiator, err := nvme.NewInitiator(e.VolumeName, e.Nqn, nvme.HostProc)
+	e.log.Info("Starting initiator for engine")
+
+	dmDeviceBusy, err = initiator.Start(targetIP, strconv.Itoa(int(port)), true)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create initiator for engine %v", e.Name)
+		return errors.Wrapf(err, "failed to start initiator for engine %v", e.Name)
 	}
-
-	dmDeviceBusy := false
-	if initiatorCreationRequired {
-		e.log.Info("Starting initiator for engine")
-		dmDeviceBusy, err = initiator.Start(targetIP, strconv.Itoa(int(port)), true)
-		if err != nil {
-			return errors.Wrapf(err, "failed to start initiator for engine %v", e.Name)
-		}
-	} else {
-		e.log.Info("Loading NVMe device info for engine")
-		err = initiator.LoadNVMeDeviceInfo(initiator.TransportAddress, initiator.TransportServiceID, initiator.SubsystemNQN)
-		if err != nil {
-			if nvme.IsValidNvmeDeviceNotFound(err) {
-				dmDeviceBusy, err = initiator.Start(targetIP, strconv.Itoa(int(targetPort)), true)
-				if err != nil {
-					return errors.Wrapf(err, "failed to start initiator for engine %v", e.Name)
-				}
-			} else {
-				return errors.Wrapf(err, "failed to load NVMe device info for engine %v", e.Name)
-			}
-		}
-		err = initiator.LoadEndpoint(false)
-		if err != nil {
-			return errors.Wrapf(err, "failed to load endpoint for engine %v", e.Name)
-		}
-		//dmDeviceBusy = true
-	}
-	e.initiator = initiator
-	e.dmDeviceBusy = dmDeviceBusy
-	e.Endpoint = initiator.GetEndpoint()
-
-	e.log = e.log.WithFields(logrus.Fields{
-		"endpoint": e.Endpoint,
-		"port":     port,
-	})
 
 	return nil
 }
@@ -481,6 +529,7 @@ func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
 		Port:              e.Port,
 		TargetIp:          e.TargetIP,
 		TargetPort:        e.TargetPort,
+		StandbyTargetPort: e.StandbyTargetPort,
 		Snapshots:         map[string]*spdkrpc.Lvol{},
 		Frontend:          e.Frontend,
 		Endpoint:          e.Endpoint,
@@ -546,16 +595,12 @@ func (e *Engine) ValidateAndUpdate(spdkClient *spdkclient.Client) (err error) {
 		}
 	}()
 
-	podIP, err := commonnet.GetIPForPod()
-	if err != nil {
-		return err
-	}
-	if e.IP != podIP {
-		// Skip the validation if the engine is being upgraded
-		if engineOnlyContainsInitiator(e) || engineOnlyContainsTarget(e) {
-			return nil
-		}
-		return fmt.Errorf("found mismatching between engine IP %s and pod IP %s for engine %v", e.IP, podIP, e.Name)
+	// podIP, err := commonnet.GetIPForPod()
+	// if err != nil {
+	// 	return err
+	// }
+	if e.IP != e.TargetIP {
+		return nil
 	}
 
 	if err := e.validateAndUpdateFrontend(subsystemMap); err != nil {
@@ -2047,6 +2092,11 @@ func (e *Engine) SwitchOverTarget(spdkClient *spdkclient.Client, targetAddress s
 		e.UpdateCh <- nil
 	}()
 
+	podIP, err := commonnet.GetIPForPod()
+	if err != nil {
+		return err
+	}
+
 	initiator, err := nvme.NewInitiator(e.VolumeName, e.Nqn, nvme.HostProc)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create initiator for engine %s target switchover", e.Name)
@@ -2088,6 +2138,11 @@ func (e *Engine) SwitchOverTarget(spdkClient *spdkclient.Client, targetAddress s
 
 	e.IP = targetIP
 	e.Port = targetPort
+
+	if targetIP == podIP {
+		e.TargetPort = targetPort
+		e.StandbyTargetPort = 0
+	}
 
 	e.log.Info("Reloading device mapper after target switchover")
 	if err := e.reloadDevice(); err != nil {
