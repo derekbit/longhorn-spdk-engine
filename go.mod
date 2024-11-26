@@ -61,3 +61,5 @@ require (
 )
 
 replace github.com/longhorn/types v0.0.0-20241123075624-48c550af4eab => github.com/derekbit/longhorn-types v0.0.0-20241126114320-36b8b01a8cb5
+
+replace github.com/longhorn/go-spdk-helper v0.0.0-20241124090314-c396ae715a7f => github.com/derekbit/go-spdk-helper v0.0.0-20241126144651-846f96d92d49

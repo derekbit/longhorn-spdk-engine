@@ -33,17 +33,19 @@ const (
 )
 
 type Initiator struct {
-	Name               string
-	SubsystemNQN       string
-	UUID               string
+	Name         string
+	SubsystemNQN string
+	UUID         string
+
 	TransportAddress   string
 	TransportServiceID string
+	ControllerName     string
+	ControllerState    string
+	NamespaceName      string
 
-	Endpoint       string
-	ControllerName string
-	NamespaceName  string
-	dev            *util.LonghornBlockDevice
-	isUp           bool
+	Endpoint string
+	dev      *util.LonghornBlockDevice
+	isUp     bool
 
 	hostProc string
 	executor *commonns.Executor
@@ -467,11 +469,13 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 	if i.ControllerName != "" && i.ControllerName != nvmeDevices[0].Controllers[0].Controller {
 		return fmt.Errorf("found mismatching between the detected controller name %s and the recorded value %s for NVMe initiator %s", nvmeDevices[0].Controllers[0].Controller, i.ControllerName, i.Name)
 	}
-	i.ControllerName = nvmeDevices[0].Controllers[0].Controller
 	i.NamespaceName = nvmeDevices[0].Namespaces[0].NameSpace
+	i.ControllerName = nvmeDevices[0].Controllers[0].Controller
+	i.ControllerState = nvmeDevices[0].Controllers[0].State
 	i.TransportAddress, i.TransportServiceID = GetIPAndPortFromControllerAddress(nvmeDevices[0].Controllers[0].Address)
 	i.logger.WithFields(logrus.Fields{
 		"controllerName":     i.ControllerName,
+		"controllerState":    i.ControllerState,
 		"namespaceName":      i.NamespaceName,
 		"transportAddress":   i.TransportAddress,
 		"transportServiceID": i.TransportServiceID,
