@@ -60,4 +60,4 @@ require (
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8 // indirect
 )
 
-replace github.com/longhorn/types v0.0.0-20241123075624-48c550af4eab => github.com/derekbit/longhorn-types v0.0.0-20241124094428-42b24b71568f
+replace github.com/longhorn/types v0.0.0-20241123075624-48c550af4eab => github.com/derekbit/longhorn-types v0.0.0-20241126114320-36b8b01a8cb5

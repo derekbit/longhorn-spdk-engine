@@ -73,7 +73,7 @@ github.com/longhorn/go-spdk-helper/pkg/spdk/setup
 github.com/longhorn/go-spdk-helper/pkg/spdk/types
 github.com/longhorn/go-spdk-helper/pkg/types
 github.com/longhorn/go-spdk-helper/pkg/util
-# github.com/longhorn/types v0.0.0-20241123075624-48c550af4eab => github.com/derekbit/longhorn-types v0.0.0-20241124094428-42b24b71568f
+# github.com/longhorn/types v0.0.0-20241123075624-48c550af4eab => github.com/derekbit/longhorn-types v0.0.0-20241126114320-36b8b01a8cb5
 ## explicit; go 1.22.7
 github.com/longhorn/types/pkg/generated/spdkrpc
 # github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0

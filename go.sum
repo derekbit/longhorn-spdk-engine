@@ -18,8 +18,8 @@ github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSs
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/derekbit/longhorn-types v0.0.0-20241124094428-42b24b71568f h1:9VmEuUI3BWl656Cn/+7tHfG1OoqJyfOIFtozwEUCeG4=
-github.com/derekbit/longhorn-types v0.0.0-20241124094428-42b24b71568f/go.mod h1:dIPa2yMBPOa514bn3pohT7kbVAQcZbZSWItpgxunuPs=
+github.com/derekbit/longhorn-types v0.0.0-20241126114320-36b8b01a8cb5 h1:r7oV/k86j2XNfNOXvGrkUwjoZNT4EpeL67kUf46JgGc=
+github.com/derekbit/longhorn-types v0.0.0-20241126114320-36b8b01a8cb5/go.mod h1:dIPa2yMBPOa514bn3pohT7kbVAQcZbZSWItpgxunuPs=
 github.com/gammazero/deque v0.2.0 h1:SkieyNB4bg2/uZZLxvya0Pq6diUlwx7m2TeT7GAIWaA=
 github.com/gammazero/deque v0.2.0/go.mod h1:LFroj8x4cMYCukHJDbxFCkT+r9AndaJnFMuZDV34tuU=
 github.com/gammazero/workerpool v1.1.3 h1:WixN4xzukFoN0XSeXF6puqEqFTl2mECI9S6W44HWy9Q=
