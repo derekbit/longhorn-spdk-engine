@@ -2089,8 +2089,7 @@ func (e *Engine) Suspend(spdkClient *spdkclient.Client) (err error) {
 
 		if err != nil {
 			if e.State != types.InstanceStateError {
-				e.State = types.InstanceStateError
-				e.log.WithError(err).Info("Failed to suspend engine, will mark the engine as error")
+				e.log.WithError(err).Warn("Failed to suspend engine")
 			}
 			e.ErrorMsg = err.Error()
 		} else {
@@ -2121,8 +2120,7 @@ func (e *Engine) Resume(spdkClient *spdkclient.Client) (err error) {
 
 		if err != nil {
 			if e.State != types.InstanceStateError {
-				e.State = types.InstanceStateError
-				e.log.WithError(err).Info("Failed to resume engine, will mark the engine as error")
+				e.log.WithError(err).Warn("Failed to resume engine")
 			}
 			e.ErrorMsg = err.Error()
 		} else {
