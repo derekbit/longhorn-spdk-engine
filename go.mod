@@ -7,6 +7,7 @@ toolchain go1.23.3
 require (
 	github.com/0xPolygon/polygon-edge v1.3.3
 	github.com/google/uuid v1.6.0
+	github.com/jinzhu/copier v0.4.0
 	github.com/longhorn/backupstore v0.0.0-20241124092526-138305866a87
 	github.com/longhorn/go-common-libs v0.0.0-20241124035508-d6221574e626
 	github.com/longhorn/go-spdk-helper v0.0.0-20241124090314-c396ae715a7f
@@ -62,4 +63,4 @@ require (
 
 replace github.com/longhorn/types v0.0.0-20241123075624-48c550af4eab => github.com/derekbit/longhorn-types v0.0.0-20241126114320-36b8b01a8cb5
 
-replace github.com/longhorn/go-spdk-helper v0.0.0-20241124090314-c396ae715a7f => github.com/derekbit/go-spdk-helper v0.0.0-20241126144651-846f96d92d49
+replace github.com/longhorn/go-spdk-helper v0.0.0-20241124090314-c396ae715a7f => github.com/derekbit/go-spdk-helper v0.0.0-20241127051732-ee129e33b157

@@ -39,8 +39,9 @@ type Initiator struct {
 
 	TransportAddress   string
 	TransportServiceID string
+	SourceAddress      string
 	ControllerName     string
-	ControllerState    string
+	ControllerState    types.NVMeControllerState
 	NamespaceName      string
 
 	Endpoint string
@@ -461,25 +462,40 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 		return err
 	}
 	if len(nvmeDevices) != 1 {
-		return fmt.Errorf("found zero or multiple devices NVMe initiator %s", i.Name)
+		return fmt.Errorf("found %v NVMe devices for NVMe initiator %s. Only one device is expected", len(nvmeDevices), i.Name)
 	}
-	if len(nvmeDevices[0].Namespaces) != 1 {
-		return fmt.Errorf("found zero or multiple devices for NVMe initiator %s", i.Name)
-	}
+
 	if i.ControllerName != "" && i.ControllerName != nvmeDevices[0].Controllers[0].Controller {
-		return fmt.Errorf("found mismatching between the detected controller name %s and the recorded value %s for NVMe initiator %s", nvmeDevices[0].Controllers[0].Controller, i.ControllerName, i.Name)
+		return fmt.Errorf("found mismatching between the detected controller name %s and the recorded value %s for NVMe initiator %s",
+			nvmeDevices[0].Controllers[0].Controller, i.ControllerName, i.Name)
 	}
-	i.NamespaceName = nvmeDevices[0].Namespaces[0].NameSpace
+
 	i.ControllerName = nvmeDevices[0].Controllers[0].Controller
 	i.ControllerState = nvmeDevices[0].Controllers[0].State
-	i.TransportAddress, i.TransportServiceID = GetIPAndPortFromControllerAddress(nvmeDevices[0].Controllers[0].Address)
+	i.TransportAddress, i.TransportServiceID, i.SourceAddress = ParseControllerAddress(nvmeDevices[0].Controllers[0].Address)
+
 	i.logger.WithFields(logrus.Fields{
 		"controllerName":     i.ControllerName,
 		"controllerState":    i.ControllerState,
-		"namespaceName":      i.NamespaceName,
 		"transportAddress":   i.TransportAddress,
 		"transportServiceID": i.TransportServiceID,
+		"sourceAddress":      i.SourceAddress,
 	})
+
+	switch len(nvmeDevices[0].Namespaces) {
+	case 0:
+		if i.ControllerState == types.NVMeControllerStateLive ||
+			i.ControllerState == types.NVMeControllerStateConnecting ||
+			i.ControllerState == types.NVMeControllerStateResetting {
+			i.logger.Warnf("No namespace found for NVMe initiator %s with controller state %s", i.Name, i.ControllerState)
+			return nil
+		}
+	case 1:
+		i.NamespaceName = nvmeDevices[0].Namespaces[0].NameSpace
+		i.logger.WithField("namespaceName", i.NamespaceName)
+	default:
+		return fmt.Errorf("found %v namespaces for NVMe initiator %s. Only one namespace is expected", len(nvmeDevices[0].Namespaces), i.Name)
+	}
 
 	devicePath := fmt.Sprintf("/dev/%s", i.NamespaceName)
 	dev, err := util.DetectDevice(devicePath, i.executor)
@@ -490,6 +506,7 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 	i.dev = &util.LonghornBlockDevice{
 		Nvme: *dev,
 	}
+
 	return nil
 }
 

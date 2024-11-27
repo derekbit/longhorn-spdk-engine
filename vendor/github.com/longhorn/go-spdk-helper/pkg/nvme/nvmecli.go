@@ -41,7 +41,7 @@ type Controller struct {
 	Controller string
 	Transport  string
 	Address    string
-	State      string
+	State      types.NVMeControllerState
 }
 
 // Namespace fields use signed integers instead, because the output of buggy nvme-cli 2.x is possibly negative.
@@ -61,10 +61,10 @@ type Subsystem struct {
 }
 
 type Path struct {
-	Name      string `json:"Name,omitempty"`
-	Transport string `json:"Transport,omitempty"`
-	Address   string `json:"Address,omitempty"`
-	State     string `json:"State,omitempty"`
+	Name      string                    `json:"Name,omitempty"`
+	Transport string                    `json:"Transport,omitempty"`
+	Address   string                    `json:"Address,omitempty"`
+	State     types.NVMeControllerState `json:"State,omitempty"`
 }
 
 func cliVersion(executor *commonns.Executor) (major, minor int, err error) {
@@ -388,11 +388,9 @@ func extractJSONString(str string) (string, error) {
 	return "", fmt.Errorf("invalid JSON string")
 }
 
-// GetIPAndPortFromControllerAddress returns the IP and port from the controller address
+// ParseControllerAddress returns the IP and port from the controller address
 // Input can be either "traddr=10.42.2.18 trsvcid=20006" or "traddr=10.42.2.18,trsvcid=20006"
-func GetIPAndPortFromControllerAddress(address string) (string, string) {
-	var traddr, trsvcid string
-
+func ParseControllerAddress(address string) (traddr, trsvcid, srcAddr string) {
 	parts := strings.FieldsFunc(address, func(r rune) bool {
 		return r == ',' || r == ' '
 	})
@@ -407,11 +405,13 @@ func GetIPAndPortFromControllerAddress(address string) (string, string) {
 				traddr = value
 			case "trsvcid":
 				trsvcid = value
+			case "src_addr":
+				srcAddr = value
 			}
 		}
 	}
 
-	return traddr, trsvcid
+	return traddr, trsvcid, srcAddr
 }
 
 func flush(devicePath, namespaceID string, executor *commonns.Executor) (string, error) {

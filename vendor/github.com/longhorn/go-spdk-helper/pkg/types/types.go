@@ -52,3 +52,16 @@ type DiskStatus struct {
 	Device       string
 	BlockDevices string
 }
+
+// https://elixir.bootlin.com/linux/v6.12.1/source/drivers/nvme/host/sysfs.c#L365-L375
+type NVMeControllerState string
+
+const (
+	NVMeControllerStateNew        = "new"
+	NVMeControllerStateLive       = "live"
+	NVMeControllerStateResetting  = "resetting"
+	NVMeControllerStateConnecting = "connecting"
+	NVMeControllerStateDeleting   = "deleting"
+	NVMeControllerStateNoIO       = "deleting (no IO)"
+	NVMeControllerStateDead       = "dead"
+)

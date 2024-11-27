@@ -77,7 +77,6 @@ func GetDevices(ip, port, nqn string, executor *commonns.Executor) (devices []De
 		return nil, err
 	}
 	for _, d := range nvmeDevices {
-		// Get subsystem
 		subsystems, err := listSubsystems(d.DevicePath, executor)
 		if err != nil {
 			logrus.WithError(err).Warnf("failed to get subsystem for nvme device %s", d.DevicePath)
@@ -133,7 +132,7 @@ func GetDevices(ip, port, nqn string, executor *commonns.Executor) (devices []De
 			continue
 		}
 		for _, c := range d.Controllers {
-			controllerIP, controllerPort := GetIPAndPortFromControllerAddress(c.Address)
+			controllerIP, controllerPort, _ := ParseControllerAddress(c.Address)
 			if ip != "" && ip != controllerIP {
 				continue
 			}
@@ -161,12 +160,26 @@ func GetDevices(ip, port, nqn string, executor *commonns.Executor) (devices []De
 				continue
 			}
 			for _, path := range sys.Paths {
-				return nil, fmt.Errorf("subsystem NQN %s path %v address %v is in %s state",
-					nqn, path.Name, path.Address, path.State)
+				// return nil, fmt.Errorf("subsystem NQN %s path %v address %v is in %s state",
+				// 	nqn, path.Name, path.Address, path.State)
+				res = append(res, Device{
+					Subsystem:    sys.Name,
+					SubsystemNQN: sys.NQN,
+					Controllers: []Controller{
+						{
+							Controller: path.Name,
+							Transport:  path.Transport,
+							Address:    path.Address,
+							State:      path.State,
+						},
+					},
+					Namespaces: []Namespace{},
+				})
 			}
 		}
-
-		return nil, fmt.Errorf(ErrorMessageCannotFindValidNvmeDevice+" with subsystem NQN %s and address %s:%s", nqn, ip, port)
+		if len(res) == 0 {
+			return nil, fmt.Errorf(ErrorMessageCannotFindValidNvmeDevice+" with subsystem NQN %s and address %s:%s", nqn, ip, port)
+		}
 	}
 	return res, nil
 }
