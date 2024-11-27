@@ -10,20 +10,22 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+
+	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
+	"github.com/longhorn/go-spdk-helper/pkg/nvme"
+	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
 	commonbitmap "github.com/longhorn/go-common-libs/bitmap"
 	commonnet "github.com/longhorn/go-common-libs/net"
 	commontypes "github.com/longhorn/go-common-libs/types"
 	commonutils "github.com/longhorn/go-common-libs/utils"
-	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
-	"github.com/longhorn/go-spdk-helper/pkg/nvme"
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
 	helperutil "github.com/longhorn/go-spdk-helper/pkg/util"
-	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
 	"github.com/longhorn/longhorn-spdk-engine/pkg/api"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/client"
@@ -47,6 +49,7 @@ type Engine struct {
 	Endpoint          string
 	Nqn               string
 	Nguid             string
+	NvmeSubsystem     api.NvmeSubsystem
 
 	ReplicaStatusMap map[string]*EngineReplicaStatus
 
@@ -98,6 +101,10 @@ func NewEngine(engineName, volumeName, frontend string, specSize uint64, engineU
 		State: types.InstanceStatePending,
 
 		SnapshotMap: map[string]*api.Lvol{},
+
+		NvmeSubsystem: api.NvmeSubsystem{
+			Paths: map[string]*api.NvmeDevicePath{},
+		},
 
 		UpdateCh: engineUpdateCh,
 
@@ -613,6 +620,19 @@ func (e *Engine) Get() (res *spdkrpc.Engine) {
 }
 
 func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
+	nvmeSubsystem := &spdkrpc.NvmeSubsystem{
+		Paths: map[string]*spdkrpc.NvmeDevicePath{},
+	}
+	for pathName, path := range e.NvmeSubsystem.Paths {
+		nvmeSubsystem.Paths[pathName] = &spdkrpc.NvmeDevicePath{
+			Trtype:  path.Trtype,
+			Traddr:  path.Traddr,
+			Trsvcid: path.Trsvcid,
+			SrcAddr: path.SrcAddr,
+			State:   string(path.State),
+		}
+	}
+
 	res = &spdkrpc.Engine{
 		Name:              e.Name,
 		SpecSize:          e.SpecSize,
@@ -629,6 +649,7 @@ func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
 		Endpoint:          e.Endpoint,
 		State:             string(e.State),
 		ErrorMsg:          e.ErrorMsg,
+		NvmeSubsystem:     nvmeSubsystem,
 	}
 
 	for replicaName, replicaStatus := range e.ReplicaStatusMap {
@@ -643,11 +664,50 @@ func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
 	return res
 }
 
+func areNvmeSubsystemsEqual(old, new *api.NvmeSubsystem) bool {
+	if len(old.Paths) != len(new.Paths) {
+		return false
+	}
+	for oldPathName, oldPath := range old.Paths {
+		newPath, ok := new.Paths[oldPathName]
+		if !ok {
+			return false
+		}
+		if oldPath.Trtype != newPath.Trtype ||
+			oldPath.Traddr != newPath.Traddr ||
+			oldPath.Trsvcid != newPath.Trsvcid ||
+			oldPath.SrcAddr != newPath.SrcAddr ||
+			oldPath.State != newPath.State {
+			return false
+		}
+
+	}
+	return true
+}
+
 func (e *Engine) ValidateAndUpdate(spdkClient *spdkclient.Client) (err error) {
 	updateRequired := false
 
 	e.Lock()
+	existingNvemSubsystem := api.NvmeSubsystem{
+		Paths: map[string]*api.NvmeDevicePath{},
+	}
+	for pathName, path := range e.NvmeSubsystem.Paths {
+		existingNvemSubsystem.Paths[pathName] = &api.NvmeDevicePath{
+			Trtype:  path.Trtype,
+			Traddr:  path.Traddr,
+			Trsvcid: path.Trsvcid,
+			SrcAddr: path.SrcAddr,
+			State:   path.State,
+		}
+	}
+
 	defer func() {
+		if !areNvmeSubsystemsEqual(&existingNvemSubsystem, &e.NvmeSubsystem) {
+			e.log.Infof("Found difference between existing nvme subsystem %+v and updated nvme subsystem %+v during ValidateAndUpdate", existingNvemSubsystem, e.NvmeSubsystem)
+			updateRequired = true
+		}
+
 		e.Unlock()
 
 		if updateRequired {
@@ -927,14 +987,26 @@ func (e *Engine) validateAndUpdateFrontend(subsystemMap map[string]*spdktypes.Nv
 			}
 			e.initiator = initiator
 		}
-		if err := e.initiator.LoadNVMeDeviceInfo(e.initiator.TransportAddress, e.initiator.TransportServiceID, e.initiator.SubsystemNQN); err != nil {
-			if strings.Contains(err.Error(), "connecting state") ||
-				strings.Contains(err.Error(), "resetting state") {
-				e.log.WithError(err).Warnf("Ignored to validate and update engine %v, because the device is still in a transient state", e.Name)
-				return nil
-			}
-			return err
+
+		err = e.initiator.LoadNVMeDeviceInfo(e.initiator.TransportAddress, e.initiator.TransportServiceID, e.initiator.SubsystemNQN)
+		if err != nil {
+			return errors.Wrapf(err, "failed to load NVMe device info for engine %v", e.Name)
 		}
+		e.NvmeSubsystem.Paths[e.initiator.ControllerName] = &api.NvmeDevicePath{
+			Trtype:  string(spdktypes.NvmeTransportTypeTCP),
+			Traddr:  e.initiator.TransportAddress,
+			Trsvcid: e.initiator.TransportServiceID,
+			SrcAddr: e.initiator.SourceAddress,
+			State:   e.initiator.ControllerState,
+		}
+
+		if e.NvmeSubsystem.Paths[e.initiator.ControllerName].State == helpertypes.NVMeControllerStateConnecting ||
+			e.NvmeSubsystem.Paths[e.initiator.ControllerName].State == helpertypes.NVMeControllerStateResetting {
+			e.log.WithError(err).Warnf("Ignored to validate and update engine %v, because the device is still in a %v state",
+				e.Name, e.NvmeSubsystem.Paths[e.initiator.ControllerName].State)
+			return nil
+		}
+
 		if err := e.initiator.LoadEndpoint(e.dmDeviceBusy); err != nil {
 			return err
 		}

@@ -4,6 +4,8 @@ import (
 	"github.com/longhorn/types/pkg/generated/spdkrpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
+
 	"github.com/longhorn/longhorn-spdk-engine/pkg/types"
 )
 
@@ -38,6 +40,18 @@ type Lvol struct {
 	CreationTime      string          `json:"creation_time"`
 	UserCreated       bool            `json:"user_created"`
 	SnapshotTimestamp string          `json:"snapshot_timestamp"`
+}
+
+type NvmeDevicePath struct {
+	Trtype  string                          `json:"trtype"`
+	Traddr  string                          `json:"traddr"`
+	Trsvcid string                          `json:"trsvcid"`
+	SrcAddr string                          `json:"src_addr"`
+	State   helpertypes.NVMeControllerState `json:"state"`
+}
+
+type NvmeSubsystem struct {
+	Paths map[string]*NvmeDevicePath `json:"paths"`
 }
 
 func ProtoLvolToLvol(l *spdkrpc.Lvol) *Lvol {
@@ -138,9 +152,25 @@ type Engine struct {
 	Endpoint          string                `json:"endpoint"`
 	State             string                `json:"state"`
 	ErrorMsg          string                `json:"error_msg"`
+	NvmeSubsystem     NvmeSubsystem         `json:"nvme_subsystem"`
 }
 
 func ProtoEngineToEngine(e *spdkrpc.Engine) *Engine {
+	nvme := NvmeSubsystem{
+		Paths: map[string]*NvmeDevicePath{},
+	}
+	if e.NvmeSubsystem != nil {
+		for pathName, path := range e.NvmeSubsystem.Paths {
+			nvme.Paths[pathName] = &NvmeDevicePath{
+				Trtype:  path.Trtype,
+				Traddr:  path.Traddr,
+				Trsvcid: path.Trsvcid,
+				SrcAddr: path.SrcAddr,
+				State:   helpertypes.NVMeControllerState(path.State),
+			}
+		}
+	}
+
 	res := &Engine{
 		Name:              e.Name,
 		VolumeName:        e.VolumeName,
@@ -159,6 +189,7 @@ func ProtoEngineToEngine(e *spdkrpc.Engine) *Engine {
 		Endpoint:          e.Endpoint,
 		State:             e.State,
 		ErrorMsg:          e.ErrorMsg,
+		NvmeSubsystem:     nvme,
 	}
 	for rName, mode := range e.ReplicaModeMap {
 		res.ReplicaModeMap[rName] = types.GRPCReplicaModeToReplicaMode(mode)
