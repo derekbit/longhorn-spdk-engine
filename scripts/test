@@ -18,6 +18,7 @@ fi
 
 mount --rbind /host/dev /dev
 mount --rbind /host/sys /sys
+mount --rbind /host/home/runner /home/runner
 
 ulimit -c unlimited
 echo "/home/runner/core.%h.%e.%p.%t" > /proc/sys/kernel/core_pattern
@@ -30,7 +31,7 @@ if [ ! -f /dev/hugepages ]; then
   mount -t hugetlbfs nodev /dev/hugepages
 fi
 
-trap "umount /dev && umount /sys" EXIT
+trap "umount /dev && umount /sys && umount /home/runner" EXIT
 
 # Do cleanup first
 losetup -D
