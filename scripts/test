@@ -18,6 +18,7 @@ fi
 
 mount --rbind /host/dev /dev
 mount --rbind /host/sys /sys
+mkdir /home/runner
 mount --rbind /host/home/runner /home/runner
 
 ulimit -c unlimited
