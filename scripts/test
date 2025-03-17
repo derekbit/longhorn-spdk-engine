@@ -19,6 +19,9 @@ fi
 mount --rbind /host/dev /dev
 mount --rbind /host/sys /sys
 
+ulimit -c unlimited
+echo "/home/runner/core.%h.%e.%p.%t" > /proc/sys/kernel/core_pattern
+
 # if /dev/hugepages  is not exist, create it (not use -d)
 echo "Checking /dev/hugepages"
 if [ ! -f /dev/hugepages ]; then
