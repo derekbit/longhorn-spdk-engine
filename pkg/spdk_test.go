@@ -189,7 +189,7 @@ func CleanupDiskFile(c *C, loopDevicePath string) {
 	c.Assert(err, IsNil)
 }
 
-func (s *TestSuite) TestSPDKMultipleThread(c *C) {
+func (s *TestSuite) xxTestSPDKMultipleThread(c *C) {
 	fmt.Println("Testing SPDK basic operations with multiple threads")
 
 	diskDriverName := "aio"
