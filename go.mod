@@ -75,3 +75,5 @@ require (
 	k8s.io/mount-utils v0.31.3 // indirect
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 // indirect
 )
+
+replace github.com/longhorn/types => github.com/derekbit/longhorn-types v0.0.0-20250914064531-ec5a9c3a8359

@@ -3,6 +3,7 @@ package spdk
 import (
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -35,7 +36,27 @@ const (
 	hostPrefix = "/host"
 )
 
-func svcDiskCreate(spdkClient *spdkclient.Client, diskName, diskUUID, diskPath, diskDriver string, blockSize int64) (ret *spdkrpc.Disk, err error) {
+type DiskState string
+
+const (
+	DiskStateError    = DiskState("error")
+	DiskStateReady    = DiskState("ready")
+	DiskStateCreating = DiskState("creating")
+)
+
+type Disk struct {
+	sync.Mutex
+
+	State DiskState
+}
+
+func NewDisk(name string) *Disk {
+	return &Disk{
+		State: DiskStateCreating,
+	}
+}
+
+func (d *Disk) DiskCreate(spdkClient *spdkclient.Client, diskName, diskUUID, diskPath, diskDriver string, blockSize int64) (ret *spdkrpc.Disk, err error) {
 	log := logrus.WithFields(logrus.Fields{
 		"diskName":   diskName,
 		"diskUUID":   diskUUID,
@@ -70,7 +91,7 @@ func svcDiskCreate(spdkClient *spdkclient.Client, diskName, diskUUID, diskPath, 
 	return lvstoreToDisk(spdkClient, diskPath, "", lvstoreUUID, exactDiskDriver)
 }
 
-func svcDiskDelete(spdkClient *spdkclient.Client, diskName, diskUUID, diskPath, diskDriver string) (ret *emptypb.Empty, err error) {
+func (d *Disk) DiskDelete(spdkClient *spdkclient.Client, diskName, diskUUID, diskPath, diskDriver string) (ret *emptypb.Empty, err error) {
 	log := logrus.WithFields(logrus.Fields{
 		"diskName":   diskName,
 		"diskUUID":   diskUUID,
@@ -128,7 +149,7 @@ type DeviceInfo struct {
 	DeviceDriver string `json:"device_driver"`
 }
 
-func svcDiskGet(spdkClient *spdkclient.Client, diskName, diskPath, diskDriver string) (ret *spdkrpc.Disk, err error) {
+func (d *Disk) DiskGet(spdkClient *spdkclient.Client, diskName, diskPath, diskDriver string) (ret *spdkrpc.Disk, err error) {
 	log := logrus.WithFields(logrus.Fields{
 		"diskName":   diskName,
 		"diskPath":   diskPath,
