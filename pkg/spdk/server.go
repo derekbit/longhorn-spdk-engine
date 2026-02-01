@@ -48,9 +48,10 @@ type Server struct {
 	spdkClient    *spdkclient.Client
 	portAllocator *commonbitmap.Bitmap
 
-	diskMap    map[string]*Disk
-	replicaMap map[string]*Replica
-	engineMap  map[string]*Engine
+	diskMap         map[string]*Disk
+	replicaMap      map[string]*Replica
+	engineMap       map[string]*Engine
+	engineTargetMap map[string]*EngineTarget
 
 	backupMap map[string]*Backup
 
@@ -88,7 +89,7 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 	broadcasters := map[types.InstanceType]*broadcaster.Broadcaster{}
 	broadcastChs := map[types.InstanceType]chan interface{}{}
 	updateChs := map[types.InstanceType]chan interface{}{}
-	for _, t := range []types.InstanceType{types.InstanceTypeReplica, types.InstanceTypeEngine, types.InstanceTypeBackingImage} {
+	for _, t := range []types.InstanceType{types.InstanceTypeReplica, types.InstanceTypeEngine, types.InstanceTypeEngineTarget, types.InstanceTypeBackingImage} {
 		broadcasters[t] = &broadcaster.Broadcaster{}
 		broadcastChs[t] = make(chan interface{})
 		updateChs[t] = make(chan interface{})
@@ -104,8 +105,9 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 
 		diskMap: map[string]*Disk{},
 
-		replicaMap: map[string]*Replica{},
-		engineMap:  map[string]*Engine{},
+		replicaMap:      map[string]*Replica{},
+		engineMap:       map[string]*Engine{},
+		engineTargetMap: map[string]*EngineTarget{},
 
 		backupMap: map[string]*Backup{},
 
@@ -202,6 +204,7 @@ func (s *Server) verify() (err error) {
 	replicaMap := map[string]*Replica{}
 	replicaMapForSync := map[string]*Replica{}
 	engineMapForSync := map[string]*Engine{}
+	engineTargetMapForSync := map[string]*EngineTarget{}
 	backingImageMap := map[string]*BackingImage{}
 	backingImageMapForSync := map[string]*BackingImage{}
 
@@ -212,6 +215,9 @@ func (s *Server) verify() (err error) {
 	}
 	for k, v := range s.engineMap {
 		engineMapForSync[k] = v
+	}
+	for k, v := range s.engineTargetMap {
+		engineTargetMapForSync[k] = v
 	}
 	for k, v := range s.backingImageMap {
 		backingImageMap[k] = v
@@ -231,6 +237,9 @@ func (s *Server) verify() (err error) {
 			}
 			for _, e := range engineMapForSync {
 				e.SetErrorState()
+			}
+			for _, et := range engineTargetMapForSync {
+				et.SetErrorState()
 			}
 		}
 	}()
@@ -387,6 +396,8 @@ func (s *Server) verify() (err error) {
 		}
 	}
 
+	// TODO: validate and update engine targets as well
+
 	for _, bi := range backingImageMapForSync {
 		err = bi.ValidateAndUpdate(spdkClient)
 		if err != nil {
@@ -413,6 +424,8 @@ func (s *Server) broadcasting() {
 			s.broadcastChs[types.InstanceTypeReplica] <- nil
 		case <-s.updateChs[types.InstanceTypeEngine]:
 			s.broadcastChs[types.InstanceTypeEngine] <- nil
+		case <-s.updateChs[types.InstanceTypeEngineTarget]:
+			s.broadcastChs[types.InstanceTypeEngineTarget] <- nil
 		case <-s.updateChs[types.InstanceTypeBackingImage]:
 			s.broadcastChs[types.InstanceTypeBackingImage] <- nil
 		}
@@ -426,6 +439,8 @@ func (s *Server) Subscribe(instanceType types.InstanceType) (<-chan interface{},
 	switch instanceType {
 	case types.InstanceTypeEngine:
 		return s.broadcasters[types.InstanceTypeEngine].Subscribe(context.TODO(), s.engineBroadcastConnector)
+	case types.InstanceTypeEngineTarget:
+		return s.broadcasters[types.InstanceTypeEngineTarget].Subscribe(context.TODO(), s.engineTargetBroadcastConnector)
 	case types.InstanceTypeReplica:
 		return s.broadcasters[types.InstanceTypeReplica].Subscribe(context.TODO(), s.replicaBroadcastConnector)
 	case types.InstanceTypeBackingImage:
@@ -440,6 +455,10 @@ func (s *Server) replicaBroadcastConnector() (chan interface{}, error) {
 
 func (s *Server) engineBroadcastConnector() (chan interface{}, error) {
 	return s.broadcastChs[types.InstanceTypeEngine], nil
+}
+
+func (s *Server) engineTargetBroadcastConnector() (chan interface{}, error) {
+	return s.broadcastChs[types.InstanceTypeEngineTarget], nil
 }
 
 func (s *Server) backingImageBroadcastConnector() (chan interface{}, error) {
@@ -2366,4 +2385,82 @@ func setNvmeHotPlug(spdkClient *spdkclient.Client, enable bool) (success bool) {
 		return false
 	}
 	return true
+}
+
+func (s *Server) EngineTargetCreate(ctx context.Context, req *spdkrpc.EngineTargetCreateRequest) (ret *spdkrpc.EngineTarget, err error) {
+	if req.Name == "" || req.VolumeName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine target name and volume name are required")
+	}
+	if req.SpecSize == 0 {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine target spec size is required")
+	}
+
+	s.Lock()
+
+	et, ok := s.engineTargetMap[req.Name]
+	if ok {
+		s.Unlock()
+		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine target %v already exists", req.Name)
+	}
+
+	if et == nil {
+		s.engineTargetMap[req.Name] = NewEngineTarget(req.Name, req.VolumeName, req.SpecSize, s.updateChs[types.InstanceTypeEngineTarget])
+		et = s.engineTargetMap[req.Name]
+	}
+
+	spdkClient := s.spdkClient
+	s.Unlock()
+
+	return et.Create(spdkClient, req.ReplicaAddressMap, req.PortCount, s.portAllocator, req.SalvageRequested)
+}
+
+func (s *Server) EngineTargetList(ctx context.Context, req *emptypb.Empty) (*spdkrpc.EngineTargetListResponse, error) {
+	engineTargetMap := map[string]*EngineTarget{}
+	res := map[string]*spdkrpc.EngineTarget{}
+
+	s.RLock()
+	for k, v := range s.engineTargetMap {
+		engineTargetMap[k] = v
+	}
+	s.RUnlock()
+
+	for engineTargetName, et := range engineTargetMap {
+		res[engineTargetName] = et.Get()
+	}
+
+	return &spdkrpc.EngineTargetListResponse{EngineTargets: res}, nil
+}
+
+func (s *Server) EngineTargetWatch(req *emptypb.Empty, srv spdkrpc.SPDKService_EngineTargetWatchServer) error {
+	responseCh, err := s.Subscribe(types.InstanceTypeEngineTarget)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			logrus.WithError(err).Error("SPDK service engine target watch errored out")
+		} else {
+			logrus.Info("SPDK service engine target watch ended successfully")
+		}
+	}()
+	logrus.Info("Started new SPDK service engine target update watch")
+
+	done := false
+	for {
+		select {
+		case <-s.ctx.Done():
+			logrus.Info("spdk gRPC server: stopped engine target watch due to the context done")
+			done = true
+		case <-responseCh:
+			if err := srv.Send(&emptypb.Empty{}); err != nil {
+				return err
+			}
+		}
+		if done {
+			break
+		}
+	}
+
+	return nil
 }

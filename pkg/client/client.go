@@ -1087,6 +1087,57 @@ func (c *SPDKClient) EngineBackupStatus(backupName, engineName, replicaAddress s
 	})
 }
 
+func (c *SPDKClient) EngineTargetCreate(name, volumeName string, specSize uint64, replicaAddressMap map[string]string, portCount int32, salvageRequested bool) (*api.EngineTarget, error) {
+	if name == "" || volumeName == "" || len(replicaAddressMap) == 0 {
+		return nil, fmt.Errorf("failed to start SPDK engine target: missing required parameters")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	resp, err := client.EngineTargetCreate(ctx, &spdkrpc.EngineTargetCreateRequest{
+		Name:              name,
+		VolumeName:        volumeName,
+		SpecSize:          specSize,
+		ReplicaAddressMap: replicaAddressMap,
+		PortCount:         portCount,
+		SalvageRequested:  salvageRequested,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start SPDK engine target")
+	}
+
+	return api.ProtoEngineTargetToEngineTarget(resp), nil
+}
+
+func (c *SPDKClient) EngineTargetList() (map[string]*api.EngineTarget, error) {
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	resp, err := client.EngineTargetList(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list SPDK engine targets")
+	}
+
+	res := map[string]*api.EngineTarget{}
+	for engineTargetName, et := range resp.EngineTargets {
+		res[engineTargetName] = api.ProtoEngineTargetToEngineTarget(et)
+	}
+	return res, nil
+}
+
+func (c *SPDKClient) EngineTargetWatch(ctx context.Context) (*api.EngineTargetStream, error) {
+	client := c.getSPDKServiceClient()
+	stream, err := client.EngineTargetWatch(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to open engine target watch stream")
+	}
+
+	return api.NewEngineTargetStream(stream), nil
+}
+
 func (c *SPDKClient) ReplicaBackupStatus(backupName string) (*spdkrpc.BackupStatusResponse, error) {
 	client := c.getSPDKServiceClient()
 	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)

@@ -38,6 +38,7 @@ type InstanceType string
 const (
 	InstanceTypeReplica      = InstanceType("replica")
 	InstanceTypeEngine       = InstanceType("engine")
+	InstanceTypeEngineTarget = InstanceType("engine-target")
 	InstanceTypeBackingImage = InstanceType("backingImage")
 )
 

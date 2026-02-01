@@ -195,6 +195,62 @@ func ProtoEngineToEngine(e *spdkrpc.Engine) *Engine {
 	return res
 }
 
+type EngineTarget struct {
+	Name              string                `json:"name"`
+	VolumeName        string                `json:"volumeName"`
+	SpecSize          uint64                `json:"spec_size"`
+	ActualSize        uint64                `json:"actual_size"`
+	IP                string                `json:"ip"`
+	Port              int32                 `json:"port"`
+	ReplicaAddressMap map[string]string     `json:"replica_address_map"`
+	ReplicaModeMap    map[string]types.Mode `json:"replica_mode_map"`
+	Head              *Lvol                 `json:"head"`
+	Snapshots         map[string]*Lvol      `json:"snapshots"`
+	State             string                `json:"state"`
+	ErrorMsg          string                `json:"error_msg"`
+	UUID              string                `json:"uuid"`
+}
+
+func ProtoEngineTargetToEngineTarget(et *spdkrpc.EngineTarget) *EngineTarget {
+	res := &EngineTarget{
+		Name:              et.Name,
+		VolumeName:        et.VolumeName,
+		SpecSize:          et.SpecSize,
+		ActualSize:        et.ActualSize,
+		IP:                et.Ip,
+		Port:              et.Port,
+		ReplicaAddressMap: et.ReplicaAddressMap,
+		ReplicaModeMap:    map[string]types.Mode{},
+		Head:              ProtoLvolToLvol(et.Head),
+		Snapshots:         map[string]*Lvol{},
+		State:             et.State,
+		ErrorMsg:          et.ErrorMsg,
+		UUID:              et.Uuid,
+	}
+	for rName, mode := range et.ReplicaModeMap {
+		res.ReplicaModeMap[rName] = types.GRPCReplicaModeToReplicaMode(mode)
+	}
+	for snapshotName, snapProtoLvol := range et.Snapshots {
+		res.Snapshots[snapshotName] = ProtoLvolToLvol(snapProtoLvol)
+	}
+
+	return res
+}
+
+type EngineTargetStream struct {
+	stream spdkrpc.SPDKService_EngineTargetWatchClient
+}
+
+func NewEngineTargetStream(stream spdkrpc.SPDKService_EngineTargetWatchClient) *EngineTargetStream {
+	return &EngineTargetStream{
+		stream,
+	}
+}
+
+func (s *EngineTargetStream) Recv() (*emptypb.Empty, error) {
+	return s.stream.Recv()
+}
+
 type BackingImage struct {
 	Name             string `json:"name"`
 	BackingImageUUID string `json:"backing_image_uuid"`
