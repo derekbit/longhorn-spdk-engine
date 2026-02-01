@@ -82,6 +82,9 @@ const (
 	SPDKService_EngineBackupRestore_FullMethodName                       = "/spdkrpc.SPDKService/EngineBackupRestore"
 	SPDKService_EngineBackupRestoreFinish_FullMethodName                 = "/spdkrpc.SPDKService/EngineBackupRestoreFinish"
 	SPDKService_EngineRestoreStatus_FullMethodName                       = "/spdkrpc.SPDKService/EngineRestoreStatus"
+	SPDKService_EngineTargetCreate_FullMethodName                        = "/spdkrpc.SPDKService/EngineTargetCreate"
+	SPDKService_EngineTargetList_FullMethodName                          = "/spdkrpc.SPDKService/EngineTargetList"
+	SPDKService_EngineTargetWatch_FullMethodName                         = "/spdkrpc.SPDKService/EngineTargetWatch"
 	SPDKService_BackingImageCreate_FullMethodName                        = "/spdkrpc.SPDKService/BackingImageCreate"
 	SPDKService_BackingImageDelete_FullMethodName                        = "/spdkrpc.SPDKService/BackingImageDelete"
 	SPDKService_BackingImageGet_FullMethodName                           = "/spdkrpc.SPDKService/BackingImageGet"
@@ -167,6 +170,9 @@ type SPDKServiceClient interface {
 	EngineBackupRestore(ctx context.Context, in *EngineBackupRestoreRequest, opts ...grpc.CallOption) (*EngineBackupRestoreResponse, error)
 	EngineBackupRestoreFinish(ctx context.Context, in *EngineBackupRestoreFinishRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	EngineRestoreStatus(ctx context.Context, in *RestoreStatusRequest, opts ...grpc.CallOption) (*RestoreStatusResponse, error)
+	EngineTargetCreate(ctx context.Context, in *EngineTargetCreateRequest, opts ...grpc.CallOption) (*EngineTarget, error)
+	EngineTargetList(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EngineTargetListResponse, error)
+	EngineTargetWatch(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (SPDKService_EngineTargetWatchClient, error)
 	BackingImageCreate(ctx context.Context, in *BackingImageCreateRequest, opts ...grpc.CallOption) (*BackingImage, error)
 	BackingImageDelete(ctx context.Context, in *BackingImageDeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	BackingImageGet(ctx context.Context, in *BackingImageGetRequest, opts ...grpc.CallOption) (*BackingImage, error)
@@ -800,6 +806,56 @@ func (c *sPDKServiceClient) EngineRestoreStatus(ctx context.Context, in *Restore
 	return out, nil
 }
 
+func (c *sPDKServiceClient) EngineTargetCreate(ctx context.Context, in *EngineTargetCreateRequest, opts ...grpc.CallOption) (*EngineTarget, error) {
+	out := new(EngineTarget)
+	err := c.cc.Invoke(ctx, SPDKService_EngineTargetCreate_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineTargetList(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EngineTargetListResponse, error) {
+	out := new(EngineTargetListResponse)
+	err := c.cc.Invoke(ctx, SPDKService_EngineTargetList_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineTargetWatch(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (SPDKService_EngineTargetWatchClient, error) {
+	stream, err := c.cc.NewStream(ctx, &SPDKService_ServiceDesc.Streams[2], SPDKService_EngineTargetWatch_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &sPDKServiceEngineTargetWatchClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type SPDKService_EngineTargetWatchClient interface {
+	Recv() (*emptypb.Empty, error)
+	grpc.ClientStream
+}
+
+type sPDKServiceEngineTargetWatchClient struct {
+	grpc.ClientStream
+}
+
+func (x *sPDKServiceEngineTargetWatchClient) Recv() (*emptypb.Empty, error) {
+	m := new(emptypb.Empty)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *sPDKServiceClient) BackingImageCreate(ctx context.Context, in *BackingImageCreateRequest, opts ...grpc.CallOption) (*BackingImage, error) {
 	out := new(BackingImage)
 	err := c.cc.Invoke(ctx, SPDKService_BackingImageCreate_FullMethodName, in, out, opts...)
@@ -837,7 +893,7 @@ func (c *sPDKServiceClient) BackingImageList(ctx context.Context, in *emptypb.Em
 }
 
 func (c *sPDKServiceClient) BackingImageWatch(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (SPDKService_BackingImageWatchClient, error) {
-	stream, err := c.cc.NewStream(ctx, &SPDKService_ServiceDesc.Streams[2], SPDKService_BackingImageWatch_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &SPDKService_ServiceDesc.Streams[3], SPDKService_BackingImageWatch_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1042,6 +1098,9 @@ type SPDKServiceServer interface {
 	EngineBackupRestore(context.Context, *EngineBackupRestoreRequest) (*EngineBackupRestoreResponse, error)
 	EngineBackupRestoreFinish(context.Context, *EngineBackupRestoreFinishRequest) (*emptypb.Empty, error)
 	EngineRestoreStatus(context.Context, *RestoreStatusRequest) (*RestoreStatusResponse, error)
+	EngineTargetCreate(context.Context, *EngineTargetCreateRequest) (*EngineTarget, error)
+	EngineTargetList(context.Context, *emptypb.Empty) (*EngineTargetListResponse, error)
+	EngineTargetWatch(*emptypb.Empty, SPDKService_EngineTargetWatchServer) error
 	BackingImageCreate(context.Context, *BackingImageCreateRequest) (*BackingImage, error)
 	BackingImageDelete(context.Context, *BackingImageDeleteRequest) (*emptypb.Empty, error)
 	BackingImageGet(context.Context, *BackingImageGetRequest) (*BackingImage, error)
@@ -1253,6 +1312,15 @@ func (UnimplementedSPDKServiceServer) EngineBackupRestoreFinish(context.Context,
 }
 func (UnimplementedSPDKServiceServer) EngineRestoreStatus(context.Context, *RestoreStatusRequest) (*RestoreStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineRestoreStatus not implemented")
+}
+func (UnimplementedSPDKServiceServer) EngineTargetCreate(context.Context, *EngineTargetCreateRequest) (*EngineTarget, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineTargetCreate not implemented")
+}
+func (UnimplementedSPDKServiceServer) EngineTargetList(context.Context, *emptypb.Empty) (*EngineTargetListResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineTargetList not implemented")
+}
+func (UnimplementedSPDKServiceServer) EngineTargetWatch(*emptypb.Empty, SPDKService_EngineTargetWatchServer) error {
+	return status.Errorf(codes.Unimplemented, "method EngineTargetWatch not implemented")
 }
 func (UnimplementedSPDKServiceServer) BackingImageCreate(context.Context, *BackingImageCreateRequest) (*BackingImage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackingImageCreate not implemented")
@@ -2440,6 +2508,63 @@ func _SPDKService_EngineRestoreStatus_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SPDKService_EngineTargetCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EngineTargetCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineTargetCreate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SPDKService_EngineTargetCreate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineTargetCreate(ctx, req.(*EngineTargetCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineTargetList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineTargetList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SPDKService_EngineTargetList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineTargetList(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineTargetWatch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SPDKServiceServer).EngineTargetWatch(m, &sPDKServiceEngineTargetWatchServer{stream})
+}
+
+type SPDKService_EngineTargetWatchServer interface {
+	Send(*emptypb.Empty) error
+	grpc.ServerStream
+}
+
+type sPDKServiceEngineTargetWatchServer struct {
+	grpc.ServerStream
+}
+
+func (x *sPDKServiceEngineTargetWatchServer) Send(m *emptypb.Empty) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _SPDKService_BackingImageCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BackingImageCreateRequest)
 	if err := dec(in); err != nil {
@@ -2997,6 +3122,14 @@ var SPDKService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SPDKService_EngineRestoreStatus_Handler,
 		},
 		{
+			MethodName: "EngineTargetCreate",
+			Handler:    _SPDKService_EngineTargetCreate_Handler,
+		},
+		{
+			MethodName: "EngineTargetList",
+			Handler:    _SPDKService_EngineTargetList_Handler,
+		},
+		{
 			MethodName: "BackingImageCreate",
 			Handler:    _SPDKService_BackingImageCreate_Handler,
 		},
@@ -3070,6 +3203,11 @@ var SPDKService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "EngineWatch",
 			Handler:       _SPDKService_EngineWatch_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "EngineTargetWatch",
+			Handler:       _SPDKService_EngineTargetWatch_Handler,
 			ServerStreams: true,
 		},
 		{
