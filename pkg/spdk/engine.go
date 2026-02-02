@@ -150,10 +150,10 @@ func NewEngine(engineName, volumeName, frontend string, specSize uint64, engineU
 }
 
 func (e *Engine) isNewNvmeTcpFrontendEngine() bool {
-	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.IP == "" && e.NvmeTcpFrontend.TargetIP == "" && e.NvmeTcpFrontend.StandbyTargetPort == 0
+	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.TargetIP == ""
 }
 
-func (e *Engine) isInitiatorCreationRequired(podIP, targetIP string) (bool, error) {
+func (e *Engine) isInitiatorCreationRequired(targetIP string) (bool, error) {
 	if types.IsUblkFrontend(e.Frontend) {
 		return true, nil
 	}
@@ -188,16 +188,6 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 		}
 	}()
 
-	podIP, err := commonnet.GetIPForPod()
-	if err != nil {
-		return nil, err
-	}
-
-	initiatorIP, _, err := splitHostPort(initiatorAddress)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to split initiator address %v", initiatorAddress)
-	}
-
 	targetIP, _, err := splitHostPort(targetAddress)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to split target address %v", targetAddress)
@@ -224,7 +214,7 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 		}
 	}()
 
-	initiatorCreationRequired, err := e.isInitiatorCreationRequired(podIP, initiatorIP)
+	initiatorCreationRequired, err := e.isInitiatorCreationRequired(podIP, targetIP)
 	if err != nil {
 		return nil, err
 	}
@@ -364,13 +354,6 @@ func (e *Engine) filterSalvageCandidates(replicaAddressMap map[string]string) (m
 	}
 
 	return filteredCandidates, nil
-}
-
-func (e *Engine) isStandbyTargetCreationRequired() bool {
-	// e.Port is non-zero which means the initiator instance is already created and connected to a target instance.
-	// e.TargetPort is zero which means the target instance is not created on the same pod.
-	// Thus, a standby target instance should be created for the target instance switch-over.
-	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.Port != 0 && e.NvmeTcpFrontend.TargetPort == 0
 }
 
 func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, targetAddress string, initiatorCreationRequired bool) (err error) {
@@ -655,14 +638,8 @@ func (e *Engine) releasePorts(superiorPortAllocator *commonbitmap.Bitmap) (err e
 		return nil
 	}
 	ports := map[int32]struct{}{
-		e.NvmeTcpFrontend.Port:       {},
 		e.NvmeTcpFrontend.TargetPort: {},
 	}
-
-	if errRelease := releasePortIfExists(superiorPortAllocator, ports, e.NvmeTcpFrontend.Port); errRelease != nil {
-		err = multierr.Append(err, errRelease)
-	}
-	e.NvmeTcpFrontend.Port = 0
 
 	if errRelease := releasePortIfExists(superiorPortAllocator, ports, e.NvmeTcpFrontend.TargetPort); errRelease != nil {
 		err = multierr.Append(err, errRelease)
@@ -710,11 +687,10 @@ func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
 	}
 
 	if e.NvmeTcpFrontend != nil {
-		res.Ip = e.NvmeTcpFrontend.IP
-		res.Port = e.NvmeTcpFrontend.Port
+		res.Ip = e.NvmeTcpFrontend.TargetIP
+		res.Port = e.NvmeTcpFrontend.TargetPort
 		res.TargetIp = e.NvmeTcpFrontend.TargetIP
 		res.TargetPort = e.NvmeTcpFrontend.TargetPort
-		res.StandbyTargetPort = e.NvmeTcpFrontend.StandbyTargetPort
 	}
 
 	if e.UblkFrontend != nil {
