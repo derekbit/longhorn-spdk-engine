@@ -15,8 +15,6 @@ import (
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
-	"github.com/avast/retry-go"
-
 	"github.com/longhorn/backupstore"
 	"github.com/longhorn/go-spdk-helper/pkg/initiator"
 	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
@@ -386,7 +384,7 @@ func (e *Engine) handleNvmeTcpFrontend(spdkClient *spdkclient.Client, superiorPo
 		i = e.initiator
 
 	} else {
-		i, err = e.configureNvmeTcpFrontend(initiatorCreationRequired, targetAddress)
+		i, err = e.configureNvmeTcpFrontend(targetAddress)
 		if err != nil {
 			return errors.Wrap(err, "failed to prepare NVMe/TCP frontend")
 		}
@@ -439,7 +437,7 @@ func (e *Engine) handleNvmeTcpFrontend(spdkClient *spdkclient.Client, superiorPo
 	return nil
 }
 
-func (e *Engine) configureNvmeTcpFrontend(initiatorCreationRequired bool, targetAddress string) (i *initiator.Initiator, err error) {
+func (e *Engine) configureNvmeTcpFrontend(targetAddress string) (i *initiator.Initiator, err error) {
 	targetIP, targetPort, err := splitHostPort(targetAddress)
 	if err != nil {
 		return i, err
@@ -456,36 +454,6 @@ func (e *Engine) configureNvmeTcpFrontend(initiatorCreationRequired bool, target
 	i, err = initiator.NewInitiator(e.VolumeName, initiator.HostProc, nvmeTCPInfo, nil)
 	if err != nil {
 		return i, errors.Wrapf(err, "failed to create NVMe/TCP initiator for engine %v", e.Name)
-	}
-
-	if !initiatorCreationRequired {
-		return i, nil
-	}
-
-	i.NVMeTCPInfo.TransportAddress = targetIP
-	i.NVMeTCPInfo.TransportServiceID = strconv.Itoa(int(targetPort))
-
-	// TODO:
-	// "nvme list -o json" might be empty devices for a while instance manager pod is just started.
-	// The root cause is not clear, so we need to retry to load NVMe device info.
-	if err := retry.Do(
-		func() error {
-			return i.LoadNVMeDeviceInfo(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, i.NVMeTCPInfo.SubsystemNQN)
-		},
-		retry.Attempts(uint(maxNumRetries)),
-		retry.Delay(retryInterval),
-		retry.DelayType(retry.FixedDelay),
-		retry.RetryIf(func(err error) bool {
-			return strings.Contains(err.Error(), "failed to get devices")
-		}),
-		retry.LastErrorOnly(true),
-	); err != nil {
-		return i, errors.Wrapf(err, "failed to load NVMe device info for engine %v", e.Name)
-	}
-	e.log.Info("Loaded NVMe device info for engine")
-
-	if err := i.LoadEndpointForNvmeTcpFrontend(false); err != nil {
-		return i, errors.Wrapf(err, "failed to load endpoint for engine %v", e.Name)
 	}
 
 	return i, nil
