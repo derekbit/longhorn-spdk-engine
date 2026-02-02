@@ -1202,10 +1202,11 @@ func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequ
 	if ok {
 		// Check if the engine already exists.
 		// If the engine exists and the initiator address is the same as the target address, return AlreadyExists error.
-		if localTargetExists(e) && req.InitiatorAddress == req.TargetAddress {
-			s.Unlock()
-			return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", req.Name)
-		}
+		// if localTargetExists(e) && req.InitiatorAddress == req.TargetAddress {
+		// 	s.Unlock()
+		// 	return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", req.Name)
+		// }
+		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", req.Name)
 	}
 
 	if e == nil {
@@ -1350,7 +1351,7 @@ func (s *Server) EngineDeleteTarget(ctx context.Context, req *spdkrpc.EngineDele
 		if err == nil {
 			s.Lock()
 			// Only delete the engine if both initiator (e.Port) and target (e.TargetPort) are not exists.
-			if e.NvmeTcpFrontend.Port == 0 && e.NvmeTcpFrontend.TargetPort == 0 {
+			if e.NvmeTcpFrontend.TargetPort == 0 {
 				e.log.Info("Deleting engine %s", req.Name)
 				delete(s.engineMap, req.Name)
 			}

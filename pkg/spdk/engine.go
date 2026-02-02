@@ -24,7 +24,6 @@ import (
 	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
 	commonbitmap "github.com/longhorn/go-common-libs/bitmap"
-	commonnet "github.com/longhorn/go-common-libs/net"
 	commonutils "github.com/longhorn/go-common-libs/utils"
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
@@ -761,9 +760,9 @@ func (e *Engine) ValidateAndUpdate(spdkClient *spdkclient.Client) (err error) {
 		}
 	}()
 
-	if e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.IP != e.NvmeTcpFrontend.TargetIP {
-		return nil
-	}
+	// if e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.IP != e.NvmeTcpFrontend.TargetIP {
+	// 	return nil
+	// }
 
 	if err := e.validateAndUpdateFrontend(spdkClient, subsystemMap); err != nil {
 		return err
@@ -1048,8 +1047,8 @@ func (e *Engine) validateAndUpdateNvmeTcpFrontend(subsystemMap map[string]*spdkt
 		if subsystem != nil {
 			return fmt.Errorf("found NVMf subsystem %s for engine %s with empty frontend", e.NvmeTcpFrontend.Nqn, e.Name)
 		}
-		if e.NvmeTcpFrontend.Port != 0 {
-			return fmt.Errorf("found non-zero port %v for engine %s with empty frontend", e.NvmeTcpFrontend.Port, e.Name)
+		if e.NvmeTcpFrontend.TargetPort != 0 {
+			return fmt.Errorf("found non-zero port %v for engine %s with empty frontend", e.NvmeTcpFrontend.TargetPort, e.Name)
 		}
 		return nil
 	}
@@ -1071,12 +1070,12 @@ func (e *Engine) validateAndUpdateNvmeTcpFrontend(subsystemMap map[string]*spdkt
 		if port, err = strconv.Atoi(listenAddr.Trsvcid); err != nil {
 			return err
 		}
-		if e.NvmeTcpFrontend.Port == int32(port) {
+		if e.NvmeTcpFrontend.TargetPort == int32(port) {
 			break
 		}
 	}
-	if port == 0 || e.NvmeTcpFrontend.Port != int32(port) {
-		return fmt.Errorf("cannot find a matching listener with port %d from NVMf subsystem for engine %s", e.NvmeTcpFrontend.Port, e.Name)
+	if port == 0 || e.NvmeTcpFrontend.TargetPort != int32(port) {
+		return fmt.Errorf("cannot find a matching listener with port %d from NVMf subsystem for engine %s", e.NvmeTcpFrontend.TargetPort, e.Name)
 	}
 
 	switch e.Frontend {
@@ -1113,7 +1112,7 @@ func (e *Engine) validateAndUpdateNvmeTcpFrontend(subsystemMap map[string]*spdkt
 			return fmt.Errorf("found mismatching between engine endpoint %s and actual block device endpoint %s for engine %s", e.Endpoint, blockDevEndpoint, e.Name)
 		}
 	case types.FrontendSPDKTCPNvmf:
-		nvmfEndpoint := GetNvmfEndpoint(e.NvmeTcpFrontend.Nqn, e.NvmeTcpFrontend.IP, e.NvmeTcpFrontend.Port)
+		nvmfEndpoint := GetNvmfEndpoint(e.NvmeTcpFrontend.Nqn, e.NvmeTcpFrontend.TargetIP, e.NvmeTcpFrontend.TargetPort)
 		if e.Endpoint == "" {
 			e.Endpoint = nvmfEndpoint
 		}
@@ -1529,22 +1528,22 @@ func (e *Engine) reconnectFrontend(spdkClient *spdkclient.Client, bdevRaidUUID s
 
 	// reconnect
 	if (e.Frontend == types.FrontendSPDKTCPBlockdev || e.Frontend == types.FrontendSPDKTCPNvmf) && e.Endpoint != "" {
-		targetAddress := fmt.Sprintf("%s:%d", e.NvmeTcpFrontend.TargetIP, e.NvmeTcpFrontend.TargetPort)
-		podIP, err := commonnet.GetIPForPod()
-		if err != nil {
-			return err
-		}
+		// targetAddress := fmt.Sprintf("%s:%d", e.NvmeTcpFrontend.TargetIP, e.NvmeTcpFrontend.TargetPort)
+		// podIP, err := commonnet.GetIPForPod()
+		// if err != nil {
+		// 	return err
+		// }
 
-		initiatorCreationRequired, targetCreationRequired, err := e.checkInitiatorAndTargetCreationRequirements(podIP, e.NvmeTcpFrontend.IP, e.NvmeTcpFrontend.TargetIP)
-		if err != nil {
-			return err
-		}
+		// initiatorCreationRequired, targetCreationRequired, err := e.checkInitiatorAndTargetCreationRequirements(podIP, e.NvmeTcpFrontend.TargetIP, e.NvmeTcpFrontend.TargetIP)
+		// if err != nil {
+		// 	return err
+		// }
 
-		err = e.handleNvmeTcpFrontend(spdkClient, superiorPortAllocator, 0, targetAddress, initiatorCreationRequired, targetCreationRequired)
-		if err != nil {
-			e.log.WithError(err).Errorf("failed to reconnect nvme tcp frontend during engine %s expansion", e.Name)
-			return err
-		}
+		// err = e.handleNvmeTcpFrontend(spdkClient, superiorPortAllocator, 0, targetAddress, initiatorCreationRequired, targetCreationRequired)
+		// if err != nil {
+		// 	e.log.WithError(err).Errorf("failed to reconnect nvme tcp frontend during engine %s expansion", e.Name)
+		// 	return err
+		// }
 	}
 
 	return nil
@@ -2956,113 +2955,113 @@ func (e *Engine) Resume(spdkClient *spdkclient.Client) (err error) {
 
 // SwitchOverTarget function in the Engine struct is responsible for switching the engine's target to a new address.
 func (e *Engine) SwitchOverTarget(spdkClient *spdkclient.Client, newTargetAddress string) (err error) {
-	e.log.Infof("Switching over engine to target address %s", newTargetAddress)
+	// e.log.Infof("Switching over engine to target address %s", newTargetAddress)
 
-	if e.NvmeTcpFrontend == nil {
-		return fmt.Errorf("invalid value for NvmeTcpFrontend: %v", e.NvmeTcpFrontend)
-	}
-	if newTargetAddress == "" {
-		return fmt.Errorf("invalid empty target address for engine %s target switchover", e.Name)
-	}
+	// if e.NvmeTcpFrontend == nil {
+	// 	return fmt.Errorf("invalid value for NvmeTcpFrontend: %v", e.NvmeTcpFrontend)
+	// }
+	// if newTargetAddress == "" {
+	// 	return fmt.Errorf("invalid empty target address for engine %s target switchover", e.Name)
+	// }
 
-	currentTargetAddress := ""
+	// currentTargetAddress := ""
 
-	podIP, err := commonnet.GetIPForPod()
-	if err != nil {
-		return errors.Wrapf(err, "failed to get IP for pod for engine %s target switchover", e.Name)
-	}
+	// podIP, err := commonnet.GetIPForPod()
+	// if err != nil {
+	// 	return errors.Wrapf(err, "failed to get IP for pod for engine %s target switchover", e.Name)
+	// }
 
-	newTargetIP, newTargetPort, err := splitHostPort(newTargetAddress)
-	if err != nil {
-		return errors.Wrapf(err, "failed to split target address %s for engine %s target switchover", newTargetAddress, e.Name)
-	}
+	// newTargetIP, newTargetPort, err := splitHostPort(newTargetAddress)
+	// if err != nil {
+	// 	return errors.Wrapf(err, "failed to split target address %s for engine %s target switchover", newTargetAddress, e.Name)
+	// }
 
-	e.Lock()
-	defer func() {
-		e.Unlock()
+	// e.Lock()
+	// defer func() {
+	// 	e.Unlock()
 
-		if err != nil {
-			e.log.WithError(err).Warnf("Failed to switch over engine to target address %s", newTargetAddress)
+	// 	if err != nil {
+	// 		e.log.WithError(err).Warnf("Failed to switch over engine to target address %s", newTargetAddress)
 
-			if disconnected, errCheck := e.isTargetDisconnected(); errCheck != nil {
-				e.log.WithError(errCheck).Warnf("Failed to check if target %s is disconnected", newTargetAddress)
-			} else if disconnected {
-				if currentTargetAddress != "" {
-					if errConnect := e.connectTarget(currentTargetAddress); errConnect != nil {
-						e.log.WithError(errConnect).Warnf("Failed to connect target back to %s", currentTargetAddress)
-					} else {
-						e.log.Infof("Connected target back to %s", currentTargetAddress)
+	// 		if disconnected, errCheck := e.isTargetDisconnected(); errCheck != nil {
+	// 			e.log.WithError(errCheck).Warnf("Failed to check if target %s is disconnected", newTargetAddress)
+	// 		} else if disconnected {
+	// 			if currentTargetAddress != "" {
+	// 				if errConnect := e.connectTarget(currentTargetAddress); errConnect != nil {
+	// 					e.log.WithError(errConnect).Warnf("Failed to connect target back to %s", currentTargetAddress)
+	// 				} else {
+	// 					e.log.Infof("Connected target back to %s", currentTargetAddress)
 
-						if errReload := e.reloadDevice(); errReload != nil {
-							e.log.WithError(errReload).Warnf("Failed to reload device mapper")
-						} else {
-							e.log.Infof("Reloaded device mapper for connecting target back to %s", currentTargetAddress)
-						}
-					}
-				}
-			}
-		} else {
-			e.ErrorMsg = ""
+	// 					if errReload := e.reloadDevice(); errReload != nil {
+	// 						e.log.WithError(errReload).Warnf("Failed to reload device mapper")
+	// 					} else {
+	// 						e.log.Infof("Reloaded device mapper for connecting target back to %s", currentTargetAddress)
+	// 					}
+	// 				}
+	// 			}
+	// 		}
+	// 	} else {
+	// 		e.ErrorMsg = ""
 
-			e.log.Infof("Switched over target to %s", newTargetAddress)
-		}
+	// 		e.log.Infof("Switched over target to %s", newTargetAddress)
+	// 	}
 
-		e.UpdateCh <- nil
-	}()
-	nvmeTCPInfo := &initiator.NVMeTCPInfo{
-		SubsystemNQN: e.NvmeTcpFrontend.Nqn,
-	}
-	i, err := initiator.NewInitiator(e.VolumeName, initiator.HostProc, nvmeTCPInfo, nil)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create initiator for engine %s target switchover", e.Name)
-	}
+	// 	e.UpdateCh <- nil
+	// }()
+	// nvmeTCPInfo := &initiator.NVMeTCPInfo{
+	// 	SubsystemNQN: e.NvmeTcpFrontend.Nqn,
+	// }
+	// i, err := initiator.NewInitiator(e.VolumeName, initiator.HostProc, nvmeTCPInfo, nil)
+	// if err != nil {
+	// 	return errors.Wrapf(err, "failed to create initiator for engine %s target switchover", e.Name)
+	// }
 
-	// Check if the engine is suspended before target switchover.
-	suspended, err := i.IsSuspended()
-	if err != nil {
-		return errors.Wrapf(err, "failed to check if engine %s is suspended", e.Name)
-	}
-	if !suspended {
-		return fmt.Errorf("engine %s must be suspended before target switchover", e.Name)
-	}
+	// // Check if the engine is suspended before target switchover.
+	// suspended, err := i.IsSuspended()
+	// if err != nil {
+	// 	return errors.Wrapf(err, "failed to check if engine %s is suspended", e.Name)
+	// }
+	// if !suspended {
+	// 	return fmt.Errorf("engine %s must be suspended before target switchover", e.Name)
+	// }
 
-	// Load NVMe device info before target switchover.
-	if err := i.LoadNVMeDeviceInfo(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, i.NVMeTCPInfo.SubsystemNQN); err != nil {
-		if !helpertypes.ErrorIsValidNvmeDeviceNotFound(err) {
-			return errors.Wrapf(err, "failed to load NVMe device info for engine %s target switchover", e.Name)
-		}
-	}
+	// // Load NVMe device info before target switchover.
+	// if err := i.LoadNVMeDeviceInfo(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, i.NVMeTCPInfo.SubsystemNQN); err != nil {
+	// 	if !helpertypes.ErrorIsValidNvmeDeviceNotFound(err) {
+	// 		return errors.Wrapf(err, "failed to load NVMe device info for engine %s target switchover", e.Name)
+	// 	}
+	// }
 
-	currentTargetAddress = net.JoinHostPort(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID)
-	if isSwitchOverTargetRequired(currentTargetAddress, newTargetAddress) {
-		if currentTargetAddress != "" {
-			if err := e.disconnectTarget(currentTargetAddress); err != nil {
-				return errors.Wrapf(err, "failed to disconnect target %s for engine %s", currentTargetAddress, e.Name)
-			}
-		}
+	// currentTargetAddress = net.JoinHostPort(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID)
+	// if isSwitchOverTargetRequired(currentTargetAddress, newTargetAddress) {
+	// 	if currentTargetAddress != "" {
+	// 		if err := e.disconnectTarget(currentTargetAddress); err != nil {
+	// 			return errors.Wrapf(err, "failed to disconnect target %s for engine %s", currentTargetAddress, e.Name)
+	// 		}
+	// 	}
 
-		if err := e.connectTarget(newTargetAddress); err != nil {
-			return errors.Wrapf(err, "failed to connect target %s for engine %s", newTargetAddress, e.Name)
-		}
-	}
+	// 	if err := e.connectTarget(newTargetAddress); err != nil {
+	// 		return errors.Wrapf(err, "failed to connect target %s for engine %s", newTargetAddress, e.Name)
+	// 	}
+	// }
 
-	// Replace IP and Port with the new target address.
-	// No need to update TargetIP, because old target is not delete yet.
-	e.NvmeTcpFrontend.IP = newTargetIP
-	e.NvmeTcpFrontend.Port = newTargetPort
+	// // Replace IP and Port with the new target address.
+	// // No need to update TargetIP, because old target is not delete yet.
+	// e.NvmeTcpFrontend.IP = newTargetIP
+	// e.NvmeTcpFrontend.Port = newTargetPort
 
-	if newTargetIP == podIP {
-		e.NvmeTcpFrontend.TargetPort = newTargetPort
-		e.NvmeTcpFrontend.StandbyTargetPort = 0
-	} else {
-		e.NvmeTcpFrontend.StandbyTargetPort = e.NvmeTcpFrontend.TargetPort
-		e.NvmeTcpFrontend.TargetPort = 0
-	}
+	// if newTargetIP == podIP {
+	// 	e.NvmeTcpFrontend.TargetPort = newTargetPort
+	// 	e.NvmeTcpFrontend.StandbyTargetPort = 0
+	// } else {
+	// 	e.NvmeTcpFrontend.StandbyTargetPort = e.NvmeTcpFrontend.TargetPort
+	// 	e.NvmeTcpFrontend.TargetPort = 0
+	// }
 
-	e.log.Info("Reloading device mapper after target switchover")
-	if err := e.reloadDevice(); err != nil {
-		return errors.Wrapf(err, "failed to reload device mapper after engine %s target switchover", e.Name)
-	}
+	// e.log.Info("Reloading device mapper after target switchover")
+	// if err := e.reloadDevice(); err != nil {
+	// 	return errors.Wrapf(err, "failed to reload device mapper after engine %s target switchover", e.Name)
+	// }
 
 	return nil
 }
