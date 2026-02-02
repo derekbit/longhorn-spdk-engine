@@ -1220,9 +1220,9 @@ func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequ
 	return e.Create(spdkClient, req.ReplicaAddressMap, req.PortCount, s.portAllocator, req.InitiatorAddress, req.TargetAddress, req.SalvageRequested)
 }
 
-func localTargetExists(e *Engine) bool {
-	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.Port != 0 && e.NvmeTcpFrontend.TargetPort != 0
-}
+// func localTargetExists(e *Engine) bool {
+// 	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.Port != 0 && e.NvmeTcpFrontend.TargetPort != 0
+// }
 
 func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequest) (ret *emptypb.Empty, err error) {
 	s.RLock()

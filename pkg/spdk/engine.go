@@ -16,7 +16,6 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/avast/retry-go"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/longhorn/backupstore"
 	"github.com/longhorn/go-spdk-helper/pkg/initiator"
@@ -213,7 +212,7 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 		}
 	}()
 
-	initiatorCreationRequired, err := e.isInitiatorCreationRequired(podIP, targetIP)
+	initiatorCreationRequired, err := e.isInitiatorCreationRequired(targetIP)
 	if err != nil {
 		return nil, err
 	}
@@ -1500,21 +1499,21 @@ func (e *Engine) reconnectFrontend(spdkClient *spdkclient.Client, bdevRaidUUID s
 		return err
 	}
 
-	// wait the raid bdev is created
-	backoff := wait.Backoff{
-		Steps:    10,
-		Duration: time.Second,
-		Factor:   1.5,
-		Jitter:   0.1,
-		Cap:      time.Second * 10,
-	}
+	// // wait the raid bdev is created
+	// backoff := wait.Backoff{
+	// 	Steps:    10,
+	// 	Duration: time.Second,
+	// 	Factor:   1.5,
+	// 	Jitter:   0.1,
+	// 	Cap:      time.Second * 10,
+	// }
 
-	if err := retry.RetryOnConflict(backoff, func() error {
-		_, err := spdkClient.BdevRaidGet(e.Name, 0)
-		return err
-	}); err != nil {
-		return err
-	}
+	// if err := retry.RetryOnConflict(backoff, func() error {
+	// 	_, err := spdkClient.BdevRaidGet(e.Name, 0)
+	// 	return err
+	// }); err != nil {
+	// 	return err
+	// }
 
 	if e.Frontend == types.FrontendEmpty {
 		e.log.Info("No need to reconnect frontend for empty frontend")
