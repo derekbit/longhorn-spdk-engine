@@ -3225,7 +3225,7 @@ func (e *Engine) DeleteTarget(spdkClient *spdkclient.Client, superiorPortAllocat
 	if e.NvmeTcpFrontend == nil {
 		return fmt.Errorf("invalid value for NvmeTcpFrontend: %v", e.NvmeTcpFrontend)
 	}
-	e.log.Infof("Deleting target with target port %d and standby target port %d", e.NvmeTcpFrontend.TargetPort, e.NvmeTcpFrontend.StandbyTargetPort)
+	// e.log.Infof("Deleting target with target port %d and standby target port %d", e.NvmeTcpFrontend.TargetPort, e.NvmeTcpFrontend.StandbyTargetPort)
 
 	err = spdkClient.StopExposeBdev(e.NvmeTcpFrontend.Nqn)
 	if err != nil {
@@ -3265,7 +3265,7 @@ func (e *Engine) releaseTargetAndStandbyTargetPorts(superiorPortAllocator *commo
 		return fmt.Errorf("invalid value for NvmeTcpFrontend: %v", e.NvmeTcpFrontend)
 	}
 	releaseTargetPortRequired := e.NvmeTcpFrontend.TargetPort != 0
-	releaseStandbyTargetPortRequired := e.NvmeTcpFrontend.StandbyTargetPort != 0 && e.NvmeTcpFrontend.StandbyTargetPort != e.NvmeTcpFrontend.TargetPort
+	// releaseStandbyTargetPortRequired := e.NvmeTcpFrontend.StandbyTargetPort != 0 && e.NvmeTcpFrontend.StandbyTargetPort != e.NvmeTcpFrontend.TargetPort
 
 	// Release the target port
 	if releaseTargetPortRequired {
@@ -3276,12 +3276,12 @@ func (e *Engine) releaseTargetAndStandbyTargetPorts(superiorPortAllocator *commo
 	e.NvmeTcpFrontend.TargetPort = 0
 
 	// Release the standby target port
-	if releaseStandbyTargetPortRequired {
-		if err := superiorPortAllocator.ReleaseRange(e.NvmeTcpFrontend.StandbyTargetPort, e.NvmeTcpFrontend.StandbyTargetPort); err != nil {
-			return errors.Wrapf(err, "failed to release standby target port %d", e.NvmeTcpFrontend.StandbyTargetPort)
-		}
-	}
-	e.NvmeTcpFrontend.StandbyTargetPort = 0
+	// if releaseStandbyTargetPortRequired {
+	// 	if err := superiorPortAllocator.ReleaseRange(e.NvmeTcpFrontend.StandbyTargetPort, e.NvmeTcpFrontend.StandbyTargetPort); err != nil {
+	// 		return errors.Wrapf(err, "failed to release standby target port %d", e.NvmeTcpFrontend.StandbyTargetPort)
+	// 	}
+	// }
+	// e.NvmeTcpFrontend.StandbyTargetPort = 0
 
 	return nil
 }
