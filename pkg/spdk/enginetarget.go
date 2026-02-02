@@ -2,18 +2,21 @@ package spdk
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 
-	commonbitmap "github.com/longhorn/go-common-libs/bitmap"
 	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
+	"github.com/longhorn/types/pkg/generated/spdkrpc"
+
+	commonbitmap "github.com/longhorn/go-common-libs/bitmap"
+	commonnet "github.com/longhorn/go-common-libs/net"
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
-	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
 	"github.com/longhorn/longhorn-spdk-engine/pkg/api"
 	"github.com/longhorn/longhorn-spdk-engine/pkg/types"
@@ -22,6 +25,14 @@ import (
 	safelog "github.com/longhorn/longhorn-spdk-engine/pkg/log"
 )
 
+type NvmeTcpTarget struct {
+	IP   string
+	Port int32
+
+	Nqn   string
+	Nguid string
+}
+
 type EngineTarget struct {
 	sync.RWMutex
 
@@ -29,6 +40,8 @@ type EngineTarget struct {
 	VolumeName string
 	SpecSize   uint64
 	ActualSize uint64
+
+	NvmeTcpTarget *NvmeTcpTarget
 
 	ctrlrLossTimeout     int
 	fastIOFailTimeoutSec int
@@ -70,6 +83,8 @@ func NewEngineTarget(engineTargetName, volumeName string, specSize uint64, engin
 		VolumeName: volumeName,
 		SpecSize:   specSize,
 
+		NvmeTcpTarget: &NvmeTcpTarget{},
+
 		// TODO: support user-defined values
 		ctrlrLossTimeout:     replicaCtrlrLossTimeoutSec,
 		fastIOFailTimeoutSec: replicaFastIOFailTimeoutSec,
@@ -102,11 +117,6 @@ func (et *EngineTarget) Create(spdkClient *spdkclient.Client, replicaAddressMap 
 			et.UpdateCh <- nil
 		}
 	}()
-
-	// podIP, err := commonnet.GetIPForPod()
-	// if err != nil {
-	// 	return nil, err
-	// }
 
 	if et.State != types.InstanceStatePending {
 		requireUpdate = false
@@ -179,11 +189,45 @@ func (et *EngineTarget) Create(spdkClient *spdkclient.Client, replicaAddressMap 
 		return nil, err
 	}
 
+	if err := et.expose(spdkClient, superiorPortAllocator, portCount); err != nil {
+		return nil, errors.Wrapf(err, "failed to expose engine target %v", et.Name)
+	}
+
 	et.State = types.InstanceStateRunning
 
 	et.log.Info("Created engine target")
 
 	return et.getWithoutLock(), nil
+}
+
+func (et *EngineTarget) expose(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, portCount int32) error {
+	podIP, err := commonnet.GetIPForPod()
+	if err != nil {
+		return err
+	}
+
+	targetPort, _, err := superiorPortAllocator.AllocateRange(portCount)
+	if err != nil {
+		return errors.Wrapf(err, "failed to allocate port for engine target %v", et.Name)
+	}
+
+	et.NvmeTcpTarget.IP = podIP
+	et.NvmeTcpTarget.Port = targetPort
+	et.NvmeTcpTarget.Nguid = generateNGUID(et.Name)
+	et.NvmeTcpTarget.Nqn = helpertypes.GetNQN(et.Name)
+
+	et.log.Info("Blindly stopping expose RAID bdev for engine")
+	if err := spdkClient.StopExposeBdev(et.NvmeTcpTarget.Nqn); err != nil {
+		return errors.Wrapf(err, "failed to blindly stop exposing RAID bdev for engine target %v", et.Name)
+	}
+
+	et.log.Infof("Starting to expose RAID bdev for engine target %v on %v:%v", et.Name, et.NvmeTcpTarget.IP, et.NvmeTcpTarget.Port)
+	if err := spdkClient.StartExposeBdev(et.NvmeTcpTarget.Nqn, et.Name, et.NvmeTcpTarget.Nguid,
+		et.NvmeTcpTarget.IP, strconv.Itoa(int(et.NvmeTcpTarget.Port))); err != nil {
+		return errors.Wrapf(err, "failed to start exposing RAID bdev for engine target %v", et.Name)
+	}
+
+	return nil
 }
 
 func (et *EngineTarget) ValidateReplicaSize(replicaAddressMap map[string]string) error {
@@ -231,6 +275,8 @@ func (et *EngineTarget) getWithoutLock() (res *spdkrpc.EngineTarget) {
 		Name:              et.Name,
 		SpecSize:          et.SpecSize,
 		ActualSize:        et.ActualSize,
+		Ip:                et.NvmeTcpTarget.IP,
+		Port:              et.NvmeTcpTarget.Port,
 		ReplicaAddressMap: map[string]string{},
 		ReplicaModeMap:    map[string]spdkrpc.ReplicaMode{},
 		Snapshots:         map[string]*spdkrpc.Lvol{},

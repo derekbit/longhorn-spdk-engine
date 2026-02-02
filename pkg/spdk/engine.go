@@ -15,8 +15,8 @@ import (
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/avast/retry-go"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/retry"
 
 	"github.com/longhorn/backupstore"
 	"github.com/longhorn/go-spdk-helper/pkg/initiator"
@@ -84,11 +84,8 @@ type EngineReplicaStatus struct {
 }
 
 type NvmeTcpFrontend struct {
-	IP                string
-	Port              int32 // Port that initiator is connecting to
-	TargetIP          string
-	TargetPort        int32 // Port of the target that is used for letting initiator connect to
-	StandbyTargetPort int32
+	TargetIP   string
+	TargetPort int32 // Port of the target that is used for letting initiator connect to
 
 	Nqn   string
 	Nguid string
@@ -156,48 +153,19 @@ func (e *Engine) isNewNvmeTcpFrontendEngine() bool {
 	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.IP == "" && e.NvmeTcpFrontend.TargetIP == "" && e.NvmeTcpFrontend.StandbyTargetPort == 0
 }
 
-func (e *Engine) checkInitiatorAndTargetCreationRequirements(podIP, initiatorIP, targetIP string) (bool, bool, error) {
-	initiatorCreationRequired, targetCreationRequired := false, false
-	var err error
-
+func (e *Engine) isInitiatorCreationRequired(podIP, targetIP string) (bool, error) {
 	if types.IsUblkFrontend(e.Frontend) {
-		return true, true, nil
+		return true, nil
 	}
 	if e.NvmeTcpFrontend == nil {
-		return false, false, fmt.Errorf("failed to checkInitiatorAndTargetCreationRequirements: invalid NvmeTcpFrontend: %v", e.NvmeTcpFrontend)
+		return false, fmt.Errorf("failed to checkInitiatorAndTargetCreationRequirements: invalid NvmeTcpFrontend: %v", e.NvmeTcpFrontend)
 	}
 
-	if podIP == initiatorIP && podIP == targetIP {
-		// If the engine is running on the same pod, it should have both initiator and target instances
-		if e.NvmeTcpFrontend.Port == 0 && e.NvmeTcpFrontend.TargetPort == 0 {
-			// Both initiator and target instances are not created yet
-			e.log.Info("Creating both initiator and target instances")
-			initiatorCreationRequired = true
-			targetCreationRequired = true
-		} else if e.NvmeTcpFrontend.Port != 0 && e.NvmeTcpFrontend.TargetPort == 0 {
-			// Only target instance creation is required, because the initiator instance is already running
-			e.log.Info("Creating a target instance")
-			if e.NvmeTcpFrontend.StandbyTargetPort != 0 {
-				e.log.Warnf("Standby target instance with port %v is already created, will skip the target creation", e.NvmeTcpFrontend.StandbyTargetPort)
-			} else {
-				targetCreationRequired = true
-			}
-		} else {
-			e.log.Infof("Initiator instance with port %v and target instance with port %v are already created, will skip the creation", e.NvmeTcpFrontend.Port, e.NvmeTcpFrontend.TargetPort)
-		}
-	} else if podIP == initiatorIP && podIP != targetIP {
-		// Only initiator instance creation is required, because the target instance is running on a different pod
-		e.log.Info("Creating an initiator instance")
-		initiatorCreationRequired = true
-	} else if podIP == targetIP && podIP != initiatorIP {
-		// Only target instance creation is required, because the initiator instance is running on a different pod
-		e.log.Info("Creating a target instance")
-		targetCreationRequired = true
-	} else {
-		err = fmt.Errorf("invalid initiator and target addresses for engine %s creation with initiator address %v and target address %v", e.Name, initiatorIP, targetIP)
+	if e.NvmeTcpFrontend.TargetPort == 0 {
+		return true, nil
 	}
 
-	return initiatorCreationRequired, targetCreationRequired, err
+	return false, nil
 }
 
 func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[string]string, portCount int32, superiorPortAllocator *commonbitmap.Bitmap, initiatorAddress, targetAddress string, salvageRequested bool) (ret *spdkrpc.Engine, err error) {
@@ -236,15 +204,7 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 	}
 
 	if e.State != types.InstanceStatePending {
-		switchingOverBack := e.State == types.InstanceStateRunning && initiatorIP == targetIP
-		if !switchingOverBack {
-			requireUpdate = false
-			return nil, fmt.Errorf("invalid state %s for engine %s creation", e.State, e.Name)
-		}
-	}
-
-	if err := e.ValidateReplicaSize(replicaAddressMap); err != nil {
-		return nil, errors.Wrapf(err, "failed to validate replica size during engine creation")
+		return nil, fmt.Errorf("invalid state %s for engine %s creation", e.State, e.Name)
 	}
 
 	defer func() {
@@ -264,131 +224,24 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 		}
 	}()
 
-	initiatorCreationRequired, targetCreationRequired, err := e.checkInitiatorAndTargetCreationRequirements(podIP, initiatorIP, targetIP)
+	initiatorCreationRequired, err := e.isInitiatorCreationRequired(podIP, initiatorIP)
 	if err != nil {
 		return nil, err
 	}
-	if !initiatorCreationRequired && !targetCreationRequired {
+	if !initiatorCreationRequired {
 		return e.getWithoutLock(), nil
-	}
-
-	if e.isNewNvmeTcpFrontendEngine() {
-		if initiatorCreationRequired {
-			e.NvmeTcpFrontend.IP = initiatorIP
-		}
-		e.NvmeTcpFrontend.TargetIP = targetIP
-	}
-
-	if e.NvmeTcpFrontend != nil {
-		e.NvmeTcpFrontend.Nqn = helpertypes.GetNQN(e.Name)
-		if errUpdateLogger := e.log.UpdateLogger(logrus.Fields{
-			"initiatorIP": e.NvmeTcpFrontend.IP,
-			"targetIP":    e.NvmeTcpFrontend.TargetIP,
-		}); errUpdateLogger != nil {
-			e.log.WithError(errUpdateLogger).Warn("Failed to update logger with initiator and target IP during engine creation")
-		}
-	}
-
-	if targetCreationRequired || types.IsUblkFrontend(e.Frontend) {
-		_, err := spdkClient.BdevRaidGet(e.Name, 0)
-		if err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
-			return nil, errors.Wrapf(err, "failed to get raid bdev %v during engine creation", e.Name)
-		}
-
-		if salvageRequested {
-			e.log.Info("Requesting salvage for engine replicas")
-
-			replicaAddressMap, err = e.filterSalvageCandidates(replicaAddressMap)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to update replica mode to filter salvage candidates")
-			}
-		}
-
-		replicaBdevList := []string{}
-		for replicaName, replicaAddr := range replicaAddressMap {
-			e.ReplicaStatusMap[replicaName] = &EngineReplicaStatus{
-				Address: replicaAddr,
-			}
-
-			bdevName, err := connectNVMfBdev(spdkClient, replicaName, replicaAddr, e.ctrlrLossTimeout, e.fastIOFailTimeoutSec)
-			if err != nil {
-				e.log.WithError(err).Warnf("Failed to get bdev from replica %s with address %s during creation, will mark the mode to ERR and continue", replicaName, replicaAddr)
-				e.ReplicaStatusMap[replicaName].Mode = types.ModeERR
-			} else {
-				// TODO: Check if a replica is really a RW replica rather than a rebuilding failed replica
-				e.ReplicaStatusMap[replicaName].Mode = types.ModeRW
-				e.ReplicaStatusMap[replicaName].BdevName = bdevName
-				replicaBdevList = append(replicaBdevList, bdevName)
-			}
-		}
-
-		if errUpdateLogger := e.log.UpdateLogger(logrus.Fields{
-			"replicaStatusMap": e.ReplicaStatusMap,
-		}); errUpdateLogger != nil {
-			e.log.WithError(errUpdateLogger).Warn("Failed to update logger with replica status map during engine creation")
-		}
-
-		e.checkAndUpdateInfoFromReplicaNoLock()
-
-		e.log.Infof("Connecting all available replicas %+v, then launching raid during engine creation", e.ReplicaStatusMap)
-		if _, err := spdkClient.BdevRaidCreate(e.Name, spdktypes.BdevRaidLevel1, 0, replicaBdevList, ""); err != nil {
-			return nil, err
-		}
-	} else {
-		e.log.Info("Skipping target creation during engine creation")
-
-		targetSPDKServiceAddress := net.JoinHostPort(e.NvmeTcpFrontend.TargetIP, strconv.Itoa(types.SPDKServicePort))
-		targetSPDKClient, err := GetServiceClient(targetSPDKServiceAddress)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if errClose := targetSPDKClient.Close(); errClose != nil {
-				e.log.WithError(errClose).Errorf("Failed to close target spdk client with address %s during create engine", targetSPDKServiceAddress)
-			}
-		}()
-
-		e.log.Info("Fetching replica list from target engine")
-		targetEngine, err := targetSPDKClient.EngineGet(e.Name)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get engine %v from %v", e.Name, targetAddress)
-		}
-
-		for replicaName, replicaAddr := range replicaAddressMap {
-			e.ReplicaStatusMap[replicaName] = &EngineReplicaStatus{
-				Address: replicaAddr,
-			}
-			if _, ok := targetEngine.ReplicaAddressMap[replicaName]; !ok {
-				e.log.WithError(err).Warnf("Failed to get bdev from replica %s with address %s during creation, will mark the mode to ERR and continue", replicaName, replicaAddr)
-				e.ReplicaStatusMap[replicaName].Mode = types.ModeERR
-			} else {
-				// TODO: Check if a replica is really a RW replica rather than a rebuilding failed replica
-				e.ReplicaStatusMap[replicaName].Mode = types.ModeRW
-				e.ReplicaStatusMap[replicaName].BdevName = replicaName
-			}
-		}
-
-		if errUpdateLogger := e.log.UpdateLogger(logrus.Fields{
-			"replicaStatusMap": e.ReplicaStatusMap,
-		}); errUpdateLogger != nil {
-			e.log.WithError(errUpdateLogger).Warn("Failed to update logger with replica status map during engine creation")
-		}
-
-		e.log.Infof("Connected all available replicas %+v for engine reconstruction during upgrade", e.ReplicaStatusMap)
 	}
 
 	if errUpdateLogger := e.log.UpdateLogger(logrus.Fields{
 		"initiatorCreationRequired": initiatorCreationRequired,
-		"targetCreationRequired":    targetCreationRequired,
-		"initiatorAddress":          initiatorAddress,
 		"targetAddress":             targetAddress,
 	}); errUpdateLogger != nil {
-		e.log.WithError(errUpdateLogger).Warn("Failed to update logger with initiator and target creation requirements during engine creation")
+		e.log.WithError(errUpdateLogger).Warn("Failed to update logger with initiatorCreationRequired and targetAddress during engine creation")
 	}
 
 	e.log.Info("Handling frontend during engine creation")
 
-	if err := e.handleFrontend(spdkClient, superiorPortAllocator, portCount, targetAddress, initiatorCreationRequired, targetCreationRequired); err != nil {
+	if err := e.handleFrontend(spdkClient, superiorPortAllocator, targetAddress, initiatorCreationRequired); err != nil {
 		return nil, err
 	}
 
@@ -520,8 +373,7 @@ func (e *Engine) isStandbyTargetCreationRequired() bool {
 	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.Port != 0 && e.NvmeTcpFrontend.TargetPort == 0
 }
 
-func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, portCount int32, targetAddress string,
-	initiatorCreationRequired, targetCreationRequired bool) (err error) {
+func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, targetAddress string, initiatorCreationRequired bool) (err error) {
 	if !types.IsFrontendSupported(e.Frontend) {
 		return fmt.Errorf("unknown frontend type %s", e.Frontend)
 	}
@@ -534,49 +386,41 @@ func (e *Engine) handleFrontend(spdkClient *spdkclient.Client, superiorPortAlloc
 	if types.IsUblkFrontend(e.Frontend) {
 		return e.handleUblkFrontend(spdkClient)
 	}
-	return e.handleNvmeTcpFrontend(spdkClient, superiorPortAllocator, portCount, targetAddress, initiatorCreationRequired, targetCreationRequired)
+	return e.handleNvmeTcpFrontend(spdkClient, superiorPortAllocator, targetAddress, initiatorCreationRequired)
 }
 
-func (e *Engine) handleNvmeTcpFrontend(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, portCount int32, targetAddress string,
-	initiatorCreationRequired, targetCreationRequired bool) (err error) {
+func (e *Engine) handleNvmeTcpFrontend(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, targetAddress string, initiatorCreationRequired bool) (err error) {
 	if e.NvmeTcpFrontend == nil {
 		return fmt.Errorf("failed to handleNvmeTcpFrontend: invalid NvmeTcpFrontend: %v", e.NvmeTcpFrontend)
 	}
-	standbyTargetCreationRequired := e.isStandbyTargetCreationRequired()
-	frontendConfigured := e.isNvmeFrontendConfigured(standbyTargetCreationRequired)
 
-	var (
-		targetIP string
-		port     int32
-		i        *initiator.Initiator
-	)
+	frontendConfigured := e.isNvmeFrontendConfigured()
 
+	var i *initiator.Initiator
 	// If the NVMe frontend is already configured, reuse the existing initiator and connection info.
 	if frontendConfigured {
-		e.log.Infof("Reusing existing initiator. TargetIP: %s, TargetPort: %d, FrontendPort: %d",
-			e.NvmeTcpFrontend.TargetIP, e.NvmeTcpFrontend.TargetPort, e.NvmeTcpFrontend.Port)
+		e.log.Infof("Reusing existing initiator. TargetIP: %s, TargetPort: %d",
+			e.NvmeTcpFrontend.TargetIP, e.NvmeTcpFrontend.TargetPort)
 
-		targetIP = e.NvmeTcpFrontend.TargetIP
 		i = e.initiator
-		port = e.NvmeTcpFrontend.Port
+
 	} else {
-		targetIP, i, port, err = e.configureNvmeTcpFrontend(initiatorCreationRequired, targetCreationRequired, standbyTargetCreationRequired, superiorPortAllocator, portCount, targetAddress)
+		i, err = e.configureNvmeTcpFrontend(initiatorCreationRequired, targetAddress)
 		if err != nil {
-			return errors.Wrap(err, "failed to configureNvmeTcpFrontend")
+			return errors.Wrap(err, "failed to prepare NVMe/TCP frontend")
 		}
 	}
 
 	dmDeviceIsBusy := false
 	defer func() {
 		if err == nil {
-			if !standbyTargetCreationRequired && !frontendConfigured {
+			if !frontendConfigured {
 				e.initiator = i
 				e.dmDeviceIsBusy = dmDeviceIsBusy
 				e.Endpoint = i.GetEndpoint()
 
 				if errUpdateLogger := e.log.UpdateLogger(logrus.Fields{
 					"endpoint":   e.Endpoint,
-					"port":       e.NvmeTcpFrontend.Port,
 					"targetPort": e.NvmeTcpFrontend.TargetPort,
 				}); errUpdateLogger != nil {
 					e.log.WithError(errUpdateLogger).Warn("Failed to update logger with endpoint and port during engine creation")
@@ -587,23 +431,8 @@ func (e *Engine) handleNvmeTcpFrontend(spdkClient *spdkclient.Client, superiorPo
 		}
 	}()
 
-	e.log.Info("Blindly stopping expose bdev for engine")
-	if err := spdkClient.StopExposeBdev(e.NvmeTcpFrontend.Nqn); err != nil {
-		return errors.Wrapf(err, "failed to blindly stop expose bdev for engine %v", e.Name)
-	}
-
-	portStr := strconv.Itoa(int(e.NvmeTcpFrontend.Port))
-	if err := spdkClient.StartExposeBdev(e.NvmeTcpFrontend.Nqn, e.Name, e.NvmeTcpFrontend.Nguid, targetIP, portStr); err != nil {
-		return err
-	}
-
 	if e.Frontend == types.FrontendSPDKTCPNvmf {
-		e.Endpoint = GetNvmfEndpoint(e.NvmeTcpFrontend.Nqn, targetIP, port)
-		return nil
-	}
-
-	if !initiatorCreationRequired && targetCreationRequired {
-		e.log.Infof("Only creating target instance for engine, no need to start initiator")
+		e.Endpoint = GetNvmfEndpoint(e.NvmeTcpFrontend.Nqn, e.NvmeTcpFrontend.TargetIP, e.NvmeTcpFrontend.TargetPort)
 		return nil
 	}
 
@@ -621,7 +450,7 @@ func (e *Engine) handleNvmeTcpFrontend(spdkClient *spdkclient.Client, superiorPo
 	//    allowing a successful 'dmsetup reload' without breaking the mount point.
 	disconnectTarget := !e.isExpanding
 
-	dmDeviceIsBusy, err = i.StartNvmeTCPInitiator(targetIP, portStr, true, disconnectTarget)
+	dmDeviceIsBusy, err = i.StartNvmeTCPInitiator(e.NvmeTcpFrontend.TargetIP, strconv.Itoa(int(e.NvmeTcpFrontend.TargetPort)), true, disconnectTarget)
 	if err != nil {
 		return errors.Wrapf(err, "failed to start initiator for engine %v", e.Name)
 	}
@@ -629,88 +458,64 @@ func (e *Engine) handleNvmeTcpFrontend(spdkClient *spdkclient.Client, superiorPo
 	return nil
 }
 
-func (e *Engine) configureNvmeTcpFrontend(initiatorCreationRequired, targetCreationRequired, standbyTargetCreationRequired bool, superiorPortAllocator *commonbitmap.Bitmap, portCount int32, targetAddress string) (
-	targetIP string, i *initiator.Initiator, port int32, err error) {
-
-	var targetPort int32
-
-	targetIP, targetPort, err = splitHostPort(targetAddress)
+func (e *Engine) configureNvmeTcpFrontend(initiatorCreationRequired bool, targetAddress string) (i *initiator.Initiator, err error) {
+	targetIP, targetPort, err := splitHostPort(targetAddress)
 	if err != nil {
-		return targetIP, i, port, err
+		return i, err
 	}
 
 	e.NvmeTcpFrontend.Nqn = helpertypes.GetNQN(e.Name)
 	e.NvmeTcpFrontend.Nguid = generateNGUID(e.Name)
+	e.NvmeTcpFrontend.TargetIP = targetIP
+	e.NvmeTcpFrontend.TargetPort = targetPort
 
 	nvmeTCPInfo := &initiator.NVMeTCPInfo{
 		SubsystemNQN: e.NvmeTcpFrontend.Nqn,
 	}
 	i, err = initiator.NewInitiator(e.VolumeName, initiator.HostProc, nvmeTCPInfo, nil)
 	if err != nil {
-		return targetIP, i, port, errors.Wrapf(err, "failed to create initiator for engine %v", e.Name)
+		return i, errors.Wrapf(err, "failed to create NVMe/TCP initiator for engine %v", e.Name)
 	}
 
-	if initiatorCreationRequired && !targetCreationRequired {
-		i.NVMeTCPInfo.TransportAddress = targetIP
-		i.NVMeTCPInfo.TransportServiceID = strconv.Itoa(int(targetPort))
-		e.log.Infof("Target instance already exists on %v, no need to create target instance", targetAddress)
-		e.NvmeTcpFrontend.Port = targetPort
-
-		// TODO:
-		// "nvme list -o json" might be empty devices for a while instance manager pod is just started.
-		// The root cause is not clear, so we need to retry to load NVMe device info.
-		for r := 0; r < maxNumRetries; r++ {
-			err = i.LoadNVMeDeviceInfo(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, i.NVMeTCPInfo.SubsystemNQN)
-			if err != nil && strings.Contains(err.Error(), "failed to get devices") {
-				time.Sleep(retryInterval)
-				continue
-			}
-			if err == nil {
-				e.log.Info("Loaded NVMe device info for engine")
-				break
-			}
-			return targetIP, i, port, errors.Wrapf(err, "failed to load NVMe device info for engine %v", e.Name)
-		}
-
-		err = i.LoadEndpointForNvmeTcpFrontend(false)
-		if err != nil {
-			return targetIP, i, port, errors.Wrapf(err, "failed to load endpoint for engine %v", e.Name)
-		}
-
-		return targetIP, i, port, nil
+	if !initiatorCreationRequired {
+		return i, nil
 	}
 
-	port, _, err = superiorPortAllocator.AllocateRange(portCount)
-	if err != nil {
-		return targetIP, i, port, errors.Wrapf(err, "failed to allocate port for engine %v", e.Name)
-	}
-	e.log.Infof("Allocated port %v for engine", port)
+	i.NVMeTCPInfo.TransportAddress = targetIP
+	i.NVMeTCPInfo.TransportServiceID = strconv.Itoa(int(targetPort))
 
-	if initiatorCreationRequired {
-		e.NvmeTcpFrontend.Port = port
+	// TODO:
+	// "nvme list -o json" might be empty devices for a while instance manager pod is just started.
+	// The root cause is not clear, so we need to retry to load NVMe device info.
+	if err := retry.Do(
+		func() error {
+			return i.LoadNVMeDeviceInfo(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, i.NVMeTCPInfo.SubsystemNQN)
+		},
+		retry.Attempts(uint(maxNumRetries)),
+		retry.Delay(retryInterval),
+		retry.DelayType(retry.FixedDelay),
+		retry.RetryIf(func(err error) bool {
+			return strings.Contains(err.Error(), "failed to get devices")
+		}),
+		retry.LastErrorOnly(true),
+	); err != nil {
+		return i, errors.Wrapf(err, "failed to load NVMe device info for engine %v", e.Name)
 	}
-	if targetCreationRequired {
-		if standbyTargetCreationRequired {
-			e.NvmeTcpFrontend.StandbyTargetPort = port
-		} else {
-			e.NvmeTcpFrontend.TargetPort = port
-		}
+	e.log.Info("Loaded NVMe device info for engine")
+
+	if err := i.LoadEndpointForNvmeTcpFrontend(false); err != nil {
+		return i, errors.Wrapf(err, "failed to load endpoint for engine %v", e.Name)
 	}
 
-	return targetIP, i, port, nil
+	return i, nil
 }
 
-func (e *Engine) isNvmeFrontendConfigured(standbyTargetCreationRequired bool) bool {
+func (e *Engine) isNvmeFrontendConfigured() bool {
 	if e.NvmeTcpFrontend == nil || e.initiator == nil {
 		return false
 	}
 
-	if standbyTargetCreationRequired && e.NvmeTcpFrontend.StandbyTargetPort == 0 {
-		return false
-	}
-
-	if len(e.NvmeTcpFrontend.IP) == 0 || e.NvmeTcpFrontend.Port == 0 ||
-		len(e.NvmeTcpFrontend.TargetIP) == 0 || e.NvmeTcpFrontend.TargetPort == 0 ||
+	if len(e.NvmeTcpFrontend.TargetIP) == 0 || e.NvmeTcpFrontend.TargetPort == 0 ||
 		len(e.NvmeTcpFrontend.Nqn) == 0 || len(e.NvmeTcpFrontend.Nguid) == 0 {
 		return false
 	}
