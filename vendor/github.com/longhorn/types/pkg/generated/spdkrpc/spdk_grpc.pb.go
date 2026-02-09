@@ -82,6 +82,9 @@ const (
 	SPDKService_EngineBackupRestore_FullMethodName                       = "/spdkrpc.SPDKService/EngineBackupRestore"
 	SPDKService_EngineBackupRestoreFinish_FullMethodName                 = "/spdkrpc.SPDKService/EngineBackupRestoreFinish"
 	SPDKService_EngineRestoreStatus_FullMethodName                       = "/spdkrpc.SPDKService/EngineRestoreStatus"
+	SPDKService_EngineFrontendCreate_FullMethodName                      = "/spdkrpc.SPDKService/EngineFrontendCreate"
+	SPDKService_EngineFrontendList_FullMethodName                        = "/spdkrpc.SPDKService/EngineFrontendList"
+	SPDKService_EngineFrontendWatch_FullMethodName                       = "/spdkrpc.SPDKService/EngineFrontendWatch"
 	SPDKService_BackingImageCreate_FullMethodName                        = "/spdkrpc.SPDKService/BackingImageCreate"
 	SPDKService_BackingImageDelete_FullMethodName                        = "/spdkrpc.SPDKService/BackingImageDelete"
 	SPDKService_BackingImageGet_FullMethodName                           = "/spdkrpc.SPDKService/BackingImageGet"
@@ -167,6 +170,9 @@ type SPDKServiceClient interface {
 	EngineBackupRestore(ctx context.Context, in *EngineBackupRestoreRequest, opts ...grpc.CallOption) (*EngineBackupRestoreResponse, error)
 	EngineBackupRestoreFinish(ctx context.Context, in *EngineBackupRestoreFinishRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	EngineRestoreStatus(ctx context.Context, in *RestoreStatusRequest, opts ...grpc.CallOption) (*RestoreStatusResponse, error)
+	EngineFrontendCreate(ctx context.Context, in *EngineFrontendCreateRequest, opts ...grpc.CallOption) (*EngineFrontend, error)
+	EngineFrontendList(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EngineFrontendListResponse, error)
+	EngineFrontendWatch(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (SPDKService_EngineFrontendWatchClient, error)
 	BackingImageCreate(ctx context.Context, in *BackingImageCreateRequest, opts ...grpc.CallOption) (*BackingImage, error)
 	BackingImageDelete(ctx context.Context, in *BackingImageDeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	BackingImageGet(ctx context.Context, in *BackingImageGetRequest, opts ...grpc.CallOption) (*BackingImage, error)
@@ -800,6 +806,56 @@ func (c *sPDKServiceClient) EngineRestoreStatus(ctx context.Context, in *Restore
 	return out, nil
 }
 
+func (c *sPDKServiceClient) EngineFrontendCreate(ctx context.Context, in *EngineFrontendCreateRequest, opts ...grpc.CallOption) (*EngineFrontend, error) {
+	out := new(EngineFrontend)
+	err := c.cc.Invoke(ctx, SPDKService_EngineFrontendCreate_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineFrontendList(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*EngineFrontendListResponse, error) {
+	out := new(EngineFrontendListResponse)
+	err := c.cc.Invoke(ctx, SPDKService_EngineFrontendList_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sPDKServiceClient) EngineFrontendWatch(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (SPDKService_EngineFrontendWatchClient, error) {
+	stream, err := c.cc.NewStream(ctx, &SPDKService_ServiceDesc.Streams[2], SPDKService_EngineFrontendWatch_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &sPDKServiceEngineFrontendWatchClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type SPDKService_EngineFrontendWatchClient interface {
+	Recv() (*emptypb.Empty, error)
+	grpc.ClientStream
+}
+
+type sPDKServiceEngineFrontendWatchClient struct {
+	grpc.ClientStream
+}
+
+func (x *sPDKServiceEngineFrontendWatchClient) Recv() (*emptypb.Empty, error) {
+	m := new(emptypb.Empty)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *sPDKServiceClient) BackingImageCreate(ctx context.Context, in *BackingImageCreateRequest, opts ...grpc.CallOption) (*BackingImage, error) {
 	out := new(BackingImage)
 	err := c.cc.Invoke(ctx, SPDKService_BackingImageCreate_FullMethodName, in, out, opts...)
@@ -837,7 +893,7 @@ func (c *sPDKServiceClient) BackingImageList(ctx context.Context, in *emptypb.Em
 }
 
 func (c *sPDKServiceClient) BackingImageWatch(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (SPDKService_BackingImageWatchClient, error) {
-	stream, err := c.cc.NewStream(ctx, &SPDKService_ServiceDesc.Streams[2], SPDKService_BackingImageWatch_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &SPDKService_ServiceDesc.Streams[3], SPDKService_BackingImageWatch_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1042,6 +1098,9 @@ type SPDKServiceServer interface {
 	EngineBackupRestore(context.Context, *EngineBackupRestoreRequest) (*EngineBackupRestoreResponse, error)
 	EngineBackupRestoreFinish(context.Context, *EngineBackupRestoreFinishRequest) (*emptypb.Empty, error)
 	EngineRestoreStatus(context.Context, *RestoreStatusRequest) (*RestoreStatusResponse, error)
+	EngineFrontendCreate(context.Context, *EngineFrontendCreateRequest) (*EngineFrontend, error)
+	EngineFrontendList(context.Context, *emptypb.Empty) (*EngineFrontendListResponse, error)
+	EngineFrontendWatch(*emptypb.Empty, SPDKService_EngineFrontendWatchServer) error
 	BackingImageCreate(context.Context, *BackingImageCreateRequest) (*BackingImage, error)
 	BackingImageDelete(context.Context, *BackingImageDeleteRequest) (*emptypb.Empty, error)
 	BackingImageGet(context.Context, *BackingImageGetRequest) (*BackingImage, error)
@@ -1253,6 +1312,15 @@ func (UnimplementedSPDKServiceServer) EngineBackupRestoreFinish(context.Context,
 }
 func (UnimplementedSPDKServiceServer) EngineRestoreStatus(context.Context, *RestoreStatusRequest) (*RestoreStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineRestoreStatus not implemented")
+}
+func (UnimplementedSPDKServiceServer) EngineFrontendCreate(context.Context, *EngineFrontendCreateRequest) (*EngineFrontend, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineFrontendCreate not implemented")
+}
+func (UnimplementedSPDKServiceServer) EngineFrontendList(context.Context, *emptypb.Empty) (*EngineFrontendListResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EngineFrontendList not implemented")
+}
+func (UnimplementedSPDKServiceServer) EngineFrontendWatch(*emptypb.Empty, SPDKService_EngineFrontendWatchServer) error {
+	return status.Errorf(codes.Unimplemented, "method EngineFrontendWatch not implemented")
 }
 func (UnimplementedSPDKServiceServer) BackingImageCreate(context.Context, *BackingImageCreateRequest) (*BackingImage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackingImageCreate not implemented")
@@ -2440,6 +2508,63 @@ func _SPDKService_EngineRestoreStatus_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SPDKService_EngineFrontendCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EngineFrontendCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineFrontendCreate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SPDKService_EngineFrontendCreate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineFrontendCreate(ctx, req.(*EngineFrontendCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineFrontendList_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).EngineFrontendList(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SPDKService_EngineFrontendList_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).EngineFrontendList(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SPDKService_EngineFrontendWatch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SPDKServiceServer).EngineFrontendWatch(m, &sPDKServiceEngineFrontendWatchServer{stream})
+}
+
+type SPDKService_EngineFrontendWatchServer interface {
+	Send(*emptypb.Empty) error
+	grpc.ServerStream
+}
+
+type sPDKServiceEngineFrontendWatchServer struct {
+	grpc.ServerStream
+}
+
+func (x *sPDKServiceEngineFrontendWatchServer) Send(m *emptypb.Empty) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _SPDKService_BackingImageCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BackingImageCreateRequest)
 	if err := dec(in); err != nil {
@@ -2997,6 +3122,14 @@ var SPDKService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SPDKService_EngineRestoreStatus_Handler,
 		},
 		{
+			MethodName: "EngineFrontendCreate",
+			Handler:    _SPDKService_EngineFrontendCreate_Handler,
+		},
+		{
+			MethodName: "EngineFrontendList",
+			Handler:    _SPDKService_EngineFrontendList_Handler,
+		},
+		{
 			MethodName: "BackingImageCreate",
 			Handler:    _SPDKService_BackingImageCreate_Handler,
 		},
@@ -3070,6 +3203,11 @@ var SPDKService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "EngineWatch",
 			Handler:       _SPDKService_EngineWatch_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "EngineFrontendWatch",
+			Handler:       _SPDKService_EngineFrontendWatch_Handler,
 			ServerStreams: true,
 		},
 		{
