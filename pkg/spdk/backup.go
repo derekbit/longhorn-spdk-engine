@@ -208,7 +208,7 @@ func (b *Backup) CompareSnapshot(snapshotName, compareSnapshotName, volumeName s
 	return b.constructMappings(blockSize), nil
 }
 
-// ReadSnapshot reads the data from the block device exposed by NVMe-oF TCP
+// ReadSnapshot reads the data from the block device exposed by NVMe/TCP TCP
 func (b *Backup) ReadSnapshot(snapshotName, volumeName string, offset int64, data []byte) error {
 	b.Lock()
 	defer b.Unlock()
