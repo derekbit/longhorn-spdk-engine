@@ -2620,18 +2620,6 @@ func setNvmeHotPlug(spdkClient *spdkclient.Client, enable bool) (success bool) {
 	return true
 }
 
-func (s *Server) isFrontendSupported(frontend string) bool {
-	switch frontend {
-	case types.FrontendSPDKTCPBlockdev,
-		types.FrontendSPDKTCPNvmf,
-		types.FrontendUBLK,
-		types.FrontendEmpty:
-		return true
-	default:
-		return false
-	}
-}
-
 // EngineFrontendCreate creates a new engine frontend.
 func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFrontendCreateRequest) (ret *spdkrpc.EngineFrontend, err error) {
 	if req.Name == "" {
@@ -2647,7 +2635,7 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "spec size is required")
 	}
 
-	if !s.isFrontendSupported(req.Frontend) {
+	if !types.IsFrontendSupported(req.Frontend) {
 		return nil, grpcstatus.Errorf(grpccodes.InvalidArgument, "frontend %v is not supported", req.Frontend)
 	}
 

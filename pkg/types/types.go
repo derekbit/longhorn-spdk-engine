@@ -70,6 +70,17 @@ func IsUblkFrontend(frontend string) bool {
 	return frontend == FrontendUBLK
 }
 
+// IsFrontendSupported returns true if the given frontend type is one of the
+// supported frontends (spdk-tcp-blockdev, spdk-tcp-nvmf, ublk, or empty).
+func IsFrontendSupported(frontend string) bool {
+	switch frontend {
+	case FrontendSPDKTCPBlockdev, FrontendSPDKTCPNvmf, FrontendUBLK, FrontendEmpty:
+		return true
+	default:
+		return false
+	}
+}
+
 func ReplicaModeToGRPCReplicaMode(mode Mode) spdkrpc.ReplicaMode {
 	switch mode {
 	case ModeWO:
