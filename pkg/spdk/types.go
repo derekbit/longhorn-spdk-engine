@@ -36,6 +36,9 @@ const (
 	maxRetries    = 30
 	retryInterval = 1 * time.Second
 
+	disconnectMaxRetries    = 5
+	disconnectRetryInterval = 1 * time.Second
+
 	MaxShallowCopyWaitTime   = 72 * time.Hour
 	ShallowCopyCheckInterval = 3 * time.Second
 

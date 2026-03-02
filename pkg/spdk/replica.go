@@ -2456,7 +2456,7 @@ func doCleanupForSnapshotCloneSrc(spdkClient *spdkclient.Client, c *SnapshotClon
 	if c == nil || c.dstCloningBdevName == "" {
 		return nil
 	}
-	if err := disconnectNVMfBdev(spdkClient, c.dstCloningBdevName, maxRetries, retryInterval); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
+	if err := disconnectNVMfBdev(spdkClient, c.dstCloningBdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
 		return fmt.Errorf("failed to disconnect the cloning bdev %s for snapshot clone src cleanup", c.dstCloningBdevName)
 	}
 	return nil
@@ -2611,7 +2611,7 @@ func (r *Replica) doCleanupForRebuildingSrc(spdkClient *spdkclient.Client) {
 	r.rebuildingSrcCache.shallowCopyStatus = ShallowCopyStatus{}
 
 	if r.rebuildingSrcCache.dstRebuildingBdevName != "" {
-		if err := disconnectNVMfBdev(spdkClient, r.rebuildingSrcCache.dstRebuildingBdevName, maxRetries, retryInterval); err != nil {
+		if err := disconnectNVMfBdev(spdkClient, r.rebuildingSrcCache.dstRebuildingBdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil {
 			r.log.WithError(err).Errorf("Failed to disconnect the rebuilding dst bdev %s for rebuilding src cleanup, will continue", r.rebuildingSrcCache.dstRebuildingBdevName)
 		}
 		// Always clear regardless of disconnect success or failure.
@@ -2661,7 +2661,7 @@ func (r *Replica) rebuildingSrcDetachNoLock(spdkClient *spdkclient.Client) (err 
 	if r.rebuildingSrcCache.dstRebuildingBdevName == "" {
 		return nil
 	}
-	if err := disconnectNVMfBdev(spdkClient, r.rebuildingSrcCache.dstRebuildingBdevName, maxRetries, retryInterval); err != nil {
+	if err := disconnectNVMfBdev(spdkClient, r.rebuildingSrcCache.dstRebuildingBdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil {
 		return err
 	}
 	r.rebuildingSrcCache.dstRebuildingBdevName = ""
@@ -3306,7 +3306,7 @@ func (r *Replica) doCleanupForRebuildingDst(spdkClient *spdkclient.Client) error
 	_ = r.stopAllSnapshotHashing(spdkClient)
 
 	if r.rebuildingDstCache.externalSnapshotBdevName != "" {
-		if err := disconnectNVMfBdev(spdkClient, r.rebuildingDstCache.externalSnapshotBdevName, maxRetries, retryInterval); err != nil {
+		if err := disconnectNVMfBdev(spdkClient, r.rebuildingDstCache.externalSnapshotBdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil {
 			r.log.WithError(err).Errorf("Rebuilding dst replica failed to disconnect the external src snapshot bdev %s for rebuilding dst cleanup, will continue", r.rebuildingDstCache.externalSnapshotBdevName)
 			aggregatedErrors = append(aggregatedErrors, err)
 		}

@@ -462,7 +462,7 @@ func (e *Engine) Delete(spdkClient *spdkclient.Client, superiorPortAllocator *co
 
 func (e *Engine) disconnectReplicas(spdkClient *spdkclient.Client) (requireUpdate bool, err error) {
 	for replicaName, replicaStatus := range e.ReplicaStatusMap {
-		if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, maxRetries, retryInterval); err != nil {
+		if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil {
 			if replicaStatus.Mode != types.ModeERR {
 				e.log.WithError(err).Errorf("Engine failed to disconnect replica %s with bdev %s during deletion, will update the mode from %v to ERR", replicaName, replicaStatus.BdevName, replicaStatus.Mode)
 				replicaStatus.Mode = types.ModeERR
@@ -1663,7 +1663,7 @@ func (e *Engine) replicaSnapshotOperation(spdkClient *spdkclient.Client, replica
 		if replicaStatus == nil {
 			return fmt.Errorf("cannot find replica %s in the engine %s replica status map during snapshot %s operation", replicaName, e.Name, snapshotName)
 		}
-		if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, maxRetries, retryInterval); err != nil {
+		if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil {
 			return err
 		}
 		replicaStatus.BdevName = ""
@@ -2019,7 +2019,7 @@ func (e *Engine) BackupRestore(spdkClient *spdkclient.Client, backupUrl, engineN
 
 	e.log.Info("Disconnecting all replicas before restoration")
 	for replicaName, replicaStatus := range e.ReplicaStatusMap {
-		if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, maxRetries, retryInterval); err != nil {
+		if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil {
 			e.log.Infof("Failed to remove replica %s before restoration", replicaName)
 			return nil, errors.Wrapf(err, "failed to remove replica %s before restoration", replicaName)
 		}
@@ -2432,7 +2432,7 @@ func (e *Engine) expandSingleReplica(spdkClient *spdkclient.Client, replicaName 
 		return nil
 	}
 
-	if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, maxRetries, retryInterval); err != nil {
+	if err := disconnectNVMfBdev(spdkClient, replicaStatus.BdevName, disconnectMaxRetries, disconnectRetryInterval); err != nil {
 		return err
 	}
 

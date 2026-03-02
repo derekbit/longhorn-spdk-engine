@@ -208,8 +208,8 @@ func disconnectNVMfBdev(spdkClient *spdkclient.Client, bdevName string, maxRetri
 		retry.LastErrorOnly(true),
 		retry.OnRetry(func(n uint, err error) {
 			logrus.WithError(err).Warnf(
-				"Retrying NVMe bdev detach: controller=%s attempt=%d/10 next_wait=1s",
-				controllerName, n+1,
+				"Retrying NVMe bdev detach: controller=%s attempt=%d/%d next_wait=%s",
+				controllerName, n+1, maxRetries, retryInterval,
 			)
 		}),
 	)
