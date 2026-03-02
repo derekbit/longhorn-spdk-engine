@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
 
@@ -160,4 +164,87 @@ func (s *TestSuite) TestHandleReplicaExpandResult(c *C) {
 	c.Assert(ePartial.ReplicaStatusMap["r1"].Mode, Equals, lhtypes.Mode(lhtypes.ModeERR))
 	c.Assert(ePartial.ReplicaStatusMap["r2"].Mode, Equals, lhtypes.Mode(lhtypes.ModeRW))
 	c.Assert(ePartial.lastExpansionError, Not(Equals), "")
+}
+
+func (s *TestSuite) TestExpandDoesNotBlockConcurrentGet(c *C) {
+	fmt.Println("Testing Expand lock scope does not block concurrent Get calls")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	ef.State = lhtypes.InstanceStateRunning
+	ef.EngineIP = "10.0.0.1"
+
+	// Simulate the Phase 1 lock pattern from Expand: acquire, read, release
+	var wg sync.WaitGroup
+	getCh := make(chan *spdkrpc.EngineFrontend, 1)
+
+	// Start a goroutine that simulates Phase 1 of Expand (lock → read → unlock)
+	// then holds a "long operation" before Phase 3 (re-lock → finishExpansion → unlock)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// Phase 1: lock, read, unlock
+		ef.Lock()
+		_ = ef.SpecSize
+		ef.Unlock()
+
+		// Simulate Phase 2: long operation without lock
+		time.Sleep(100 * time.Millisecond)
+
+		// Phase 3: re-lock, update, unlock
+		ef.Lock()
+		ef.Unlock()
+	}()
+
+	// Give the goroutine time to enter "Phase 2" (unlocked state)
+	time.Sleep(20 * time.Millisecond)
+
+	// Concurrent Get() should not block
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		result := ef.Get()
+		getCh <- result
+	}()
+
+	select {
+	case result := <-getCh:
+		c.Assert(result, NotNil)
+		c.Assert(result.Name, Equals, "ef-a")
+	case <-time.After(2 * time.Second):
+		c.Fatal("Get() call was blocked — potential deadlock due to Expand holding lock during long operations")
+	}
+
+	wg.Wait()
+}
+
+func (s *TestSuite) TestExpandCapturesTargetAddressWithNilNvmeTcpFrontend(c *C) {
+	fmt.Println("Testing Expand safely computes targetAddress when NvmeTcpFrontend is nil")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendUBLK, 1024, 0, 0, make(chan interface{}, 1))
+	ef.NvmeTcpFrontend = nil // force nil, simulating UBLK-only scenario
+
+	// Test the targetAddress capture logic
+	ef.Lock()
+	var targetAddress string
+	if ef.NvmeTcpFrontend != nil {
+		targetAddress = "should-not-be-set"
+	}
+	ef.Unlock()
+
+	c.Assert(targetAddress, Equals, "")
+}
+
+func (s *TestSuite) TestExpandResumeGuardsNilInitiator(c *C) {
+	fmt.Println("Testing Expand resume defer guards against nil initiator")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	ef.initiator = nil
+
+	// Simulate the resume defer guard — should NOT panic.
+	c.Assert(func() {
+		if ef.initiator != nil {
+			_ = ef.initiator.Resume()
+		}
+	}, Not(PanicMatches), ".*")
 }

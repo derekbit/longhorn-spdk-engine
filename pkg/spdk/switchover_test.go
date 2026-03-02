@@ -334,3 +334,58 @@ func (s *TestSuite) TestServerEngineFrontendSwitchOverEngineNotFound(c *C) {
 	c.Assert(ok, Equals, true)
 	c.Assert(st.Code(), Equals, grpccodes.NotFound)
 }
+
+func (s *TestSuite) TestCreateUblkFrontendNilReturnsCorrectErrorField(c *C) {
+	fmt.Println("Testing createUblkFrontend with nil UblkFrontend returns error referencing UblkFrontend")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendUBLK, 1024, 0, 0, make(chan interface{}, 1))
+	ef.UblkFrontend = nil // force nil
+
+	err := ef.createUblkFrontend(nil)
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "UblkFrontend"), Equals, true)
+	// Ensure it does NOT reference the wrong field
+	c.Assert(strings.Contains(err.Error(), "NvmeTcpFrontend"), Equals, false)
+}
+
+func (s *TestSuite) TestIsInitiatorCreationRequiredUblkReturnsTrue(c *C) {
+	fmt.Println("Testing isInitiatorCreationRequired returns true for UBLK frontend")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendUBLK, 1024, 0, 0, make(chan interface{}, 1))
+
+	required, err := ef.isInitiatorCreationRequired("10.0.0.1")
+	c.Assert(err, IsNil)
+	c.Assert(required, Equals, true)
+}
+
+func (s *TestSuite) TestIsInitiatorCreationRequiredNvmeTcpBlockdevNewEngine(c *C) {
+	fmt.Println("Testing isInitiatorCreationRequired returns true for new NVMe/TCP blockdev engine (port=0)")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+
+	required, err := ef.isInitiatorCreationRequired("10.0.0.1")
+	c.Assert(err, IsNil)
+	c.Assert(required, Equals, true)
+}
+
+func (s *TestSuite) TestIsInitiatorCreationRequiredNvmeTcpBlockdevExistingEngine(c *C) {
+	fmt.Println("Testing isInitiatorCreationRequired returns false for existing NVMe/TCP blockdev engine (port!=0)")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	ef.NvmeTcpFrontend.TargetPort = 3000
+
+	required, err := ef.isInitiatorCreationRequired("10.0.0.1")
+	c.Assert(err, IsNil)
+	c.Assert(required, Equals, false)
+}
+
+func (s *TestSuite) TestIsInitiatorCreationRequiredNilNvmeTcpFrontendReturnsError(c *C) {
+	fmt.Println("Testing isInitiatorCreationRequired returns error when NvmeTcpFrontend is nil for non-UBLK frontend")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	ef.NvmeTcpFrontend = nil
+
+	_, err := ef.isInitiatorCreationRequired("10.0.0.1")
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "invalid NvmeTcpFrontend"), Equals, true)
+}

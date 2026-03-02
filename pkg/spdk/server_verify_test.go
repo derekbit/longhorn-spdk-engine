@@ -5,6 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+
+	"github.com/longhorn/types/pkg/generated/spdkrpc"
+
 	spdkjsonrpc "github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
 
@@ -250,4 +255,71 @@ func (s *TestSuite) TestSyncVerifiedObjectsWithEmptyState(c *C) {
 
 	err := server.syncVerifiedObjects(state)
 	c.Assert(err, IsNil)
+}
+
+func (s *TestSuite) TestEngineFrontendCreateRegistersNewFrontend(c *C) {
+	fmt.Println("Testing EngineFrontendCreate registers a new frontend in the map")
+
+	srv := &Server{
+		engineFrontendMap: map[string]*EngineFrontend{},
+		updateChs: map[lhtypes.InstanceType]chan interface{}{
+			lhtypes.InstanceTypeEngineFrontend: make(chan interface{}, 1),
+		},
+	}
+
+	_, err := srv.EngineFrontendCreate(context.Background(), &spdkrpc.EngineFrontendCreateRequest{
+		Name:       "ef-test",
+		EngineName: "engine-a",
+		VolumeName: "vol-a",
+		Frontend:   lhtypes.FrontendSPDKTCPNvmf,
+		SpecSize:   1024,
+	})
+	// Create may store the error in ErrorMsg and return nil error.
+	_ = err
+
+	srv.RLock()
+	ef, ok := srv.engineFrontendMap["ef-test"]
+	srv.RUnlock()
+
+	c.Assert(ok, Equals, true)
+	c.Assert(ef, NotNil)
+	c.Assert(ef.Name, Equals, "ef-test")
+	c.Assert(ef.EngineName, Equals, "engine-a")
+	c.Assert(ef.VolumeName, Equals, "vol-a")
+}
+
+func (s *TestSuite) TestEngineFrontendCreateReturnsAlreadyExistsForDuplicate(c *C) {
+	fmt.Println("Testing EngineFrontendCreate returns AlreadyExists for duplicate name")
+
+	updateCh := make(chan interface{}, 1)
+
+	existing := NewEngineFrontend("ef-dup", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPNvmf, 1024, 0, 0, updateCh)
+
+	srv := &Server{
+		engineFrontendMap: map[string]*EngineFrontend{
+			"ef-dup": existing,
+		},
+		updateChs: map[lhtypes.InstanceType]chan interface{}{
+			lhtypes.InstanceTypeEngineFrontend: updateCh,
+		},
+	}
+
+	_, err := srv.EngineFrontendCreate(context.Background(), &spdkrpc.EngineFrontendCreateRequest{
+		Name:       "ef-dup",
+		EngineName: "engine-b",
+		VolumeName: "vol-b",
+		Frontend:   lhtypes.FrontendSPDKTCPNvmf,
+		SpecSize:   2048,
+	})
+	c.Assert(err, NotNil)
+
+	st, ok := grpcstatus.FromError(err)
+	c.Assert(ok, Equals, true)
+	c.Assert(st.Code(), Equals, grpccodes.AlreadyExists)
+
+	// Original frontend should be untouched
+	srv.RLock()
+	ef := srv.engineFrontendMap["ef-dup"]
+	srv.RUnlock()
+	c.Assert(ef.EngineName, Equals, "engine-a")
 }
