@@ -54,6 +54,7 @@ type EngineFrontend struct {
 	IsRestoring           bool
 	RestoringSnapshotName string
 
+	isCreating            bool
 	isExpanding           bool
 	lastExpansionFailedAt string
 	lastExpansionError    string
@@ -164,49 +165,79 @@ func (ef *EngineFrontend) Create(spdkClient *spdkclient.Client, targetAddress st
 		"frontend":      ef.Name,
 	}).Info("Creating engine frontend")
 
-	requireUpdate := true
-
-	ef.Lock()
-	defer func() {
-		ef.Unlock()
-		if requireUpdate {
-			ef.UpdateCh <- nil
-		}
-	}()
-
 	targetIP, _, err := splitHostPort(targetAddress)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to split target address %v", targetAddress)
 	}
-	ef.EngineIP = targetIP
 
+	// Phase 1: Acquire lock to check state and establish the isCreating guard
+	ef.Lock()
 	if ef.State != types.InstanceStatePending {
-		return nil, fmt.Errorf("invalid state %s for engine %s creation", ef.State, ef.Name)
+		ef.Unlock()
+		return nil, fmt.Errorf("invalid state %s for engine frontend %s creation", ef.State, ef.Name)
 	}
+	if ef.isCreating {
+		ef.Unlock()
+		return nil, fmt.Errorf("engine frontend %s is already creating", ef.Name)
+	}
+	ef.isCreating = true
+	ef.EngineIP = targetIP
+	ef.Unlock()
 
+	var requireUpdate bool
+	var frontendErr error
+
+	// Phase 3: Cleanup and final state resolution
 	defer func() {
-		if err != nil {
-			ef.log.WithError(err).Errorf("Failed to create engine frontend %s", ef.Name)
+		if r := recover(); r != nil {
+			ef.log.WithFields(logrus.Fields{
+				"panic": string(debug.Stack()),
+			}).Errorf("Recovered panic during engine frontend %s creation: %v", ef.Name, r)
+			frontendErr = errors.Wrapf(fmt.Errorf("%v", r), "panic during engine frontend %s creation", ef.Name)
+		}
+
+		ef.Lock()
+
+		ef.isCreating = false
+
+		if frontendErr != nil {
+			ef.log.WithError(frontendErr).Errorf("Failed to create engine frontend %s", ef.Name)
 			if ef.State != types.InstanceStateError {
 				ef.State = types.InstanceStateError
+				requireUpdate = true
 			}
-			ef.ErrorMsg = err.Error()
+			ef.ErrorMsg = frontendErr.Error()
 
+			// Pattern matches old behavior: we swallow the error from the return value
+			// so the caller registers it in the map, but the state is set to Error.
 			ret = ef.getWithoutLock()
 			err = nil
 		} else {
 			if ef.State != types.InstanceStateError {
 				ef.ErrorMsg = ""
 			}
+			if ef.State != types.InstanceStateRunning {
+				ef.State = types.InstanceStateRunning
+				requireUpdate = true
+			}
+			ef.log.Info("Created engine frontend")
+			ret = ef.getWithoutLock()
+		}
+		ef.Unlock()
+
+		if requireUpdate {
+			ef.UpdateCh <- nil
 		}
 	}()
 
+	// Phase 2: Operations without lock
 	initiatorCreationRequired, err := ef.isInitiatorCreationRequired(targetIP)
 	if err != nil {
-		return nil, err
+		frontendErr = err
+		return
 	}
 	if !initiatorCreationRequired {
-		return ef.getWithoutLock(), nil
+		return
 	}
 
 	ef.log.UpdateLoggerWithWarn(logrus.Fields{
@@ -216,21 +247,22 @@ func (ef *EngineFrontend) Create(spdkClient *spdkclient.Client, targetAddress st
 
 	ef.log.Info("Handling frontend during engine frontend creation")
 
-	if err := ef.handleFrontend(spdkClient, targetAddress); err != nil {
-		return nil, err
+	if frontendErr = ef.handleFrontend(spdkClient, targetAddress); frontendErr != nil {
+		return
 	}
 
-	ef.State = types.InstanceStateRunning
-
-	ef.log.Info("Created engine frontend")
-
-	return ef.getWithoutLock(), nil
+	return
 }
 
 func (ef *EngineFrontend) Delete(spdkClient *spdkclient.Client) (err error) {
 	requireUpdate := false
 
 	ef.Lock()
+	if ef.isCreating {
+		ef.Unlock()
+		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
+	}
+
 	defer func() {
 		// Considering that there may be still pending validations, it's better to update the state after the deletion.
 		if err != nil {
@@ -318,10 +350,16 @@ func (ef *EngineFrontend) createNvmeTcpFrontend(spdkClient *spdkclient.Client, t
 	} else {
 		ef.log.Infof("Creating new initiator for NVMe/TCP frontend: targetAddress: %s", targetAddress)
 
-		i, err = ef.newNvmeTcpInitiator()
+		var nqn, nguid string
+		i, nqn, nguid, err = ef.newNvmeTcpInitiator()
 		if err != nil {
 			return errors.Wrap(err, "failed to create NVMe/TCP initiator")
 		}
+
+		ef.Lock()
+		ef.NvmeTcpFrontend.Nqn = nqn
+		ef.NvmeTcpFrontend.Nguid = nguid
+		ef.Unlock()
 	}
 
 	dmDeviceIsBusy := false
@@ -332,6 +370,7 @@ func (ef *EngineFrontend) createNvmeTcpFrontend(spdkClient *spdkclient.Client, t
 		}
 
 		if !frontendConfigured {
+			ef.Lock()
 			switch ef.Frontend {
 			case types.FrontendSPDKTCPBlockdev:
 				ef.NvmeTcpFrontend.TargetIP = targetIP
@@ -344,9 +383,12 @@ func (ef *EngineFrontend) createNvmeTcpFrontend(spdkClient *spdkclient.Client, t
 				ef.NvmeTcpFrontend.TargetPort = targetPort
 				ef.Endpoint = GetNvmfEndpoint(ef.NvmeTcpFrontend.Nqn, targetIP, targetPort)
 			}
+			endpoint := ef.Endpoint
+			targetPortForLog := ef.NvmeTcpFrontend.TargetPort
+			ef.Unlock()
 			ef.log.UpdateLoggerWithWarn(logrus.Fields{
-				"endpoint":   ef.Endpoint,
-				"targetPort": ef.NvmeTcpFrontend.TargetPort,
+				"endpoint":   endpoint,
+				"targetPort": targetPortForLog,
 			}, "Failed to update logger with endpoint and port during engine frontend handling")
 		}
 
@@ -379,19 +421,19 @@ func (ef *EngineFrontend) createNvmeTcpFrontend(spdkClient *spdkclient.Client, t
 	return nil
 }
 
-func (ef *EngineFrontend) newNvmeTcpInitiator() (i *initiator.Initiator, err error) {
-	ef.NvmeTcpFrontend.Nqn = helpertypes.GetNQN(ef.EngineName)
-	ef.NvmeTcpFrontend.Nguid = generateNGUID(ef.EngineName)
+func (ef *EngineFrontend) newNvmeTcpInitiator() (i *initiator.Initiator, nqn, nguid string, err error) {
+	nqn = helpertypes.GetNQN(ef.EngineName)
+	nguid = generateNGUID(ef.EngineName)
 
 	nvmeTCPInfo := &initiator.NVMeTCPInfo{
-		SubsystemNQN: ef.NvmeTcpFrontend.Nqn,
+		SubsystemNQN: nqn,
 	}
 	i, err = initiator.NewInitiator(ef.VolumeName, initiator.HostProc, nvmeTCPInfo, nil)
 	if err != nil {
-		return i, errors.Wrapf(err, "failed to create NVMe/TCP initiator for engine %v", ef.Name)
+		return i, "", "", errors.Wrapf(err, "failed to create NVMe/TCP initiator for engine %v", ef.Name)
 	}
 
-	return i, nil
+	return i, nqn, nguid, nil
 }
 
 func (ef *EngineFrontend) getWithoutLock() (res *spdkrpc.EngineFrontend) {
@@ -447,6 +489,9 @@ func (ef *EngineFrontend) Get() (res *spdkrpc.EngineFrontend) {
 }
 
 func (ef *EngineFrontend) isNvmeTcpFrontendConfigured() bool {
+	ef.RLock()
+	defer ef.RUnlock()
+
 	if ef.NvmeTcpFrontend == nil || ef.initiator == nil {
 		return false
 	}
@@ -479,13 +524,17 @@ func (ef *EngineFrontend) createUblkFrontend(spdkClient *spdkclient.Client) (err
 
 	defer func() {
 		if err == nil {
+			ef.Lock()
 			ef.initiator = i
 			ef.dmDeviceIsBusy = dmDeviceIsBusy
 			ef.Endpoint = i.GetEndpoint()
+			endpoint := ef.Endpoint
+			ublkID := ef.UblkFrontend.UblkID
+			ef.Unlock()
 
 			ef.log.UpdateLoggerWithWarn(logrus.Fields{
-				"endpoint": ef.Endpoint,
-				"ublkID":   ef.UblkFrontend.UblkID,
+				"endpoint": endpoint,
+				"ublkID":   ublkID,
 			}, "Failed to update logger with endpoint and port during engine creation")
 			ef.log.Infof("Created engine frontend")
 		}
@@ -496,7 +545,9 @@ func (ef *EngineFrontend) createUblkFrontend(spdkClient *spdkclient.Client) (err
 		return errors.Wrapf(err, "failed to start initiator for engine %v", ef.Name)
 	}
 
+	ef.Lock()
 	ef.UblkFrontend.UblkID = i.UblkInfo.UblkID
+	ef.Unlock()
 
 	return nil
 }
@@ -525,6 +576,11 @@ func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Cli
 
 	// Phase 1: Acquire lock to read state and check expansion guards.
 	ef.Lock()
+	if ef.isCreating {
+		ef.Unlock()
+		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
+	}
+
 	originalSize := ef.SpecSize
 	engineIP := ef.EngineIP
 	engineName := ef.EngineName
@@ -804,6 +860,11 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 	updateRequired := false
 
 	ef.Lock()
+	if ef.isCreating {
+		ef.Unlock()
+		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
+	}
+
 	defer func() {
 		ef.Unlock()
 		if updateRequired {
@@ -887,11 +948,13 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 	case types.FrontendSPDKTCPBlockdev:
 		if ef.initiator == nil {
 			// Recreate initiator if the cached one is missing but frontend metadata is still valid.
-			i, initErr := ef.newNvmeTcpInitiator()
+			i, nqn, nguid, initErr := ef.newNvmeTcpInitiator()
 			if initErr != nil {
 				return errors.Wrapf(ErrSwitchOverTargetInternal, "failed to create initiator for engine frontend %s switchover: %v", ef.Name, initErr)
 			}
 			ef.initiator = i
+			ef.NvmeTcpFrontend.Nqn = nqn
+			ef.NvmeTcpFrontend.Nguid = nguid
 		}
 		// Do NOT overwrite SubsystemNQN before startNvmeTCPInitiator.
 		// The stop path inside startNvmeTCPInitiator uses SubsystemNQN to
@@ -1071,6 +1134,11 @@ func (ef *EngineFrontend) snapshotOperation(inputSnapshotName string, snapshotOp
 	updateRequired := false
 
 	ef.Lock()
+	if ef.isCreating {
+		ef.Unlock()
+		return "", fmt.Errorf("engine frontend %s is still creating", ef.Name)
+	}
+
 	defer func() {
 		ef.Unlock()
 
@@ -1318,6 +1386,11 @@ func (ef *EngineFrontend) ValidateAndUpdate(spdkClient *spdkclient.Client) (err 
 	}()
 
 	if ef.State != types.InstanceStateRunning {
+		return nil
+	}
+
+	if ef.isCreating {
+		ef.log.Debug("Engine frontend is creating, will skip the validation and update")
 		return nil
 	}
 
