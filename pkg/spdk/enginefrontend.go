@@ -279,7 +279,7 @@ func (ef *EngineFrontend) Delete(spdkClient *spdkclient.Client) (err error) {
 				ef.ErrorMsg = ""
 			}
 		}
-		if ef.State == types.InstanceStateRunning {
+		if ef.State != types.InstanceStateTerminating && ef.State != types.InstanceStateStopped {
 			ef.State = types.InstanceStateTerminating
 			requireUpdate = true
 		}
@@ -301,6 +301,13 @@ func (ef *EngineFrontend) Delete(spdkClient *spdkclient.Client) (err error) {
 		ef.Endpoint = ""
 
 		requireUpdate = true
+	}
+
+	if ef.NvmeTcpFrontend != nil {
+		ef.NvmeTcpFrontend.TargetIP = ""
+		ef.NvmeTcpFrontend.TargetPort = 0
+		ef.NvmeTcpFrontend.Nqn = ""
+		ef.NvmeTcpFrontend.Nguid = ""
 	}
 
 	ef.log.Info("Deleted engine frontend")
