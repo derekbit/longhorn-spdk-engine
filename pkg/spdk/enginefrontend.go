@@ -55,6 +55,7 @@ type EngineFrontend struct {
 	RestoringSnapshotName string
 
 	isCreating            bool
+	isSwitchingOver       bool
 	isExpanding           bool
 	lastExpansionFailedAt string
 	lastExpansionError    string
@@ -261,6 +262,10 @@ func (ef *EngineFrontend) Delete(spdkClient *spdkclient.Client) (err error) {
 	if ef.isCreating {
 		ef.Unlock()
 		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
+	}
+	if ef.isSwitchingOver {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s is switching over target", ef.Name)
 	}
 
 	defer func() {
@@ -573,6 +578,10 @@ func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Cli
 		ef.Unlock()
 		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
 	}
+	if ef.isSwitchingOver {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s is switching over target", ef.Name)
+	}
 
 	originalSize := ef.SpecSize
 	engineIP := ef.EngineIP
@@ -781,6 +790,9 @@ func (ef *EngineFrontend) Suspend(spdkClient *spdkclient.Client) (err error) {
 	if ef.State == types.InstanceStateSuspended {
 		return nil
 	}
+	if ef.isSwitchingOver {
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s is switching over target", ef.Name)
+	}
 
 	ef.log.Info("Suspending engine frontend")
 
@@ -827,6 +839,9 @@ func (ef *EngineFrontend) Resume(spdkClient *spdkclient.Client) (err error) {
 	if ef.State == types.InstanceStateRunning {
 		return nil
 	}
+	if ef.isSwitchingOver {
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s is switching over target", ef.Name)
+	}
 
 	switch ef.Frontend {
 	case types.FrontendSPDKTCPBlockdev:
@@ -850,26 +865,8 @@ func (ef *EngineFrontend) Resume(spdkClient *spdkclient.Client) (err error) {
 // For blockdev frontend, the caller must suspend the frontend before switch-over.
 // If newEngineName is empty, the function will try to resolve it via targetAddress.
 func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEngineName, targetAddress string) (err error) {
-	updateRequired := false
-
-	ef.Lock()
-	if ef.isCreating {
-		ef.Unlock()
-		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
-	}
-
-	defer func() {
-		ef.Unlock()
-		if updateRequired {
-			ef.UpdateCh <- nil
-		}
-	}()
-
 	if targetAddress == "" {
 		return errors.Wrapf(ErrSwitchOverTargetInvalidInput, "target address is required for engine frontend %s switchover", ef.Name)
-	}
-	if ef.NvmeTcpFrontend == nil {
-		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "invalid NvmeTcpFrontend for engine frontend %s switchover", ef.Name)
 	}
 
 	targetIP, targetPort, err := splitHostPort(targetAddress)
@@ -880,6 +877,22 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		return errors.Wrapf(ErrSwitchOverTargetInvalidInput, "invalid target address %q for engine frontend %s switchover", targetAddress, ef.Name)
 	}
 
+	updateRequired := false
+
+	ef.Lock()
+	if ef.isCreating {
+		ef.Unlock()
+		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
+	}
+	if ef.isSwitchingOver {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s target switchover is already in progress", ef.Name)
+	}
+	if ef.NvmeTcpFrontend == nil {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "invalid NvmeTcpFrontend for engine frontend %s switchover", ef.Name)
+	}
+
 	oldEngineIP := ef.EngineIP
 	oldEngineName := ef.EngineName
 	oldTargetIP := ef.NvmeTcpFrontend.TargetIP
@@ -888,6 +901,7 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 	oldNGUID := ef.NvmeTcpFrontend.Nguid
 	oldEndpoint := ef.Endpoint
 	oldDMDeviceIsBusy := ef.dmDeviceIsBusy
+	frontend := ef.Frontend
 
 	resolvedEngineName := newEngineName
 	if resolvedEngineName == "" && oldTargetIP == targetIP && oldTargetPort == targetPort {
@@ -898,12 +912,28 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		if ef.State != types.InstanceStateError {
 			ef.ErrorMsg = ""
 		}
+		ef.Unlock()
 		return nil
 	}
 
-	if ef.Frontend == types.FrontendSPDKTCPBlockdev && ef.State != types.InstanceStateSuspended {
-		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "invalid state %v for engine frontend %s target switchover, must be suspended", ef.State, ef.Name)
+	if frontend == types.FrontendSPDKTCPBlockdev && ef.State != types.InstanceStateSuspended {
+		state := ef.State
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "invalid state %v for engine frontend %s target switchover, must be suspended", state, ef.Name)
 	}
+	initiatorCreationRequired := frontend == types.FrontendSPDKTCPBlockdev && ef.initiator == nil
+	ef.isSwitchingOver = true
+	ef.Unlock()
+
+	defer func() {
+		ef.Lock()
+		ef.isSwitchingOver = false
+		ef.Unlock()
+
+		if updateRequired {
+			ef.UpdateCh <- nil
+		}
+	}()
 
 	if resolvedEngineName == "" {
 		resolvedEngineName, err = ef.resolveEngineNameByTargetAddress(targetAddress)
@@ -914,8 +944,9 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 	newNQN := helpertypes.GetNQN(resolvedEngineName)
 	newNGUID := generateNGUID(resolvedEngineName)
 
-	switch ef.Frontend {
+	switch frontend {
 	case types.FrontendSPDKTCPNvmf:
+		ef.Lock()
 		ef.EngineIP = targetIP
 		ef.EngineName = resolvedEngineName
 		ef.NvmeTcpFrontend.TargetIP = targetIP
@@ -926,6 +957,7 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		if ef.State != types.InstanceStateError {
 			ef.ErrorMsg = ""
 		}
+		ef.Unlock()
 		updateRequired = true
 
 		ef.log.WithFields(logrus.Fields{
@@ -939,15 +971,17 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		return nil
 
 	case types.FrontendSPDKTCPBlockdev:
-		if ef.initiator == nil {
+		if initiatorCreationRequired {
 			// Recreate initiator if the cached one is missing but frontend metadata is still valid.
 			i, nqn, nguid, initErr := ef.newNvmeTcpInitiator()
 			if initErr != nil {
 				return errors.Wrapf(ErrSwitchOverTargetInternal, "failed to create initiator for engine frontend %s switchover: %v", ef.Name, initErr)
 			}
+			ef.Lock()
 			ef.initiator = i
 			ef.NvmeTcpFrontend.Nqn = nqn
 			ef.NvmeTcpFrontend.Nguid = nguid
+			ef.Unlock()
 		}
 		// Do NOT overwrite SubsystemNQN before startNvmeTCPInitiator.
 		// The stop path inside startNvmeTCPInitiator uses SubsystemNQN to
@@ -978,6 +1012,7 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 			}
 
 			// Restore all metadata to original state regardless of rollback success to avoid go struct inconsistency
+			ef.Lock()
 			ef.EngineIP = oldEngineIP
 			ef.EngineName = oldEngineName
 			ef.NvmeTcpFrontend.TargetIP = oldTargetIP
@@ -991,14 +1026,17 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 				combinedErr := multierr.Append(switchErr, rollbackErr)
 				ef.State = types.InstanceStateError
 				ef.ErrorMsg = combinedErr.Error()
+				ef.Unlock()
 				updateRequired = true
 				return combinedErr
 			}
 			ef.ErrorMsg = switchErr.Error()
+			ef.Unlock()
 			updateRequired = true
 			return switchErr
 		}
 
+		ef.Lock()
 		ef.EngineIP = targetIP
 		ef.EngineName = resolvedEngineName
 		ef.NvmeTcpFrontend.TargetIP = targetIP
@@ -1010,6 +1048,7 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		if ef.State != types.InstanceStateError {
 			ef.ErrorMsg = ""
 		}
+		ef.Unlock()
 		updateRequired = true
 
 		ef.log.WithFields(logrus.Fields{
@@ -1131,6 +1170,10 @@ func (ef *EngineFrontend) snapshotOperation(inputSnapshotName string, snapshotOp
 		ef.Unlock()
 		return "", fmt.Errorf("engine frontend %s is still creating", ef.Name)
 	}
+	if ef.isSwitchingOver {
+		ef.Unlock()
+		return "", errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s is switching over target", ef.Name)
+	}
 
 	defer func() {
 		ef.Unlock()
@@ -1218,6 +1261,10 @@ func (ef *EngineFrontend) resume() error {
 
 func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaName, dstReplicaAddress string) (err error) {
 	ef.Lock()
+	if ef.isSwitchingOver {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s is switching over target", ef.Name)
+	}
 	if ef.State != types.InstanceStateRunning {
 		ef.Unlock()
 		return fmt.Errorf("invalid state %v for engine frontend %s replica %s add", ef.State, ef.Name, dstReplicaName)
@@ -1384,6 +1431,11 @@ func (ef *EngineFrontend) ValidateAndUpdate(spdkClient *spdkclient.Client) (err 
 
 	if ef.isCreating {
 		ef.log.Debug("Engine frontend is creating, will skip the validation and update")
+		return nil
+	}
+
+	if ef.isSwitchingOver {
+		ef.log.Debug("Engine frontend is switching over target, will skip the validation and update")
 		return nil
 	}
 
