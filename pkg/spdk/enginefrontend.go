@@ -1492,12 +1492,14 @@ func (ef *EngineFrontend) validateAndUpdateFrontend(client *spdkclient.Client) (
 		}
 		return nil
 	}
-	if ef.NvmeTcpFrontend != nil {
-		return ef.validateAndUpdateNvmeTcpFrontend()
-	} else if ef.UblkFrontend != nil {
+	switch ef.Frontend {
+	case types.FrontendUBLK:
 		return ef.validateAndUpdateUblkFrontend(client)
+	case types.FrontendSPDKTCPBlockdev, types.FrontendSPDKTCPNvmf:
+		return ef.validateAndUpdateNvmeTcpFrontend()
+	default:
+		return fmt.Errorf("unsupported frontend type %s for engine frontend %s validation", ef.Frontend, ef.Name)
 	}
-	return fmt.Errorf("both NvmeTcpFrontend and UblkFrontend are nil for engine frontend %s", ef.Name)
 }
 
 func (ef *EngineFrontend) validateAndUpdateUblkFrontend(client *spdkclient.Client) (err error) {
@@ -1513,7 +1515,7 @@ func (ef *EngineFrontend) validateAndUpdateUblkFrontend(client *spdkclient.Clien
 		return err
 	}
 	for _, ublkDevice := range ublkDeviceList {
-		if ublkDevice.BdevName == ef.Name && ublkDevice.ID != ef.UblkFrontend.UblkID {
+		if ublkDevice.BdevName == ef.EngineName && ublkDevice.ID != ef.UblkFrontend.UblkID {
 			return fmt.Errorf("found mismatching between UblkFrontend.UblkID %v and actual ublk device id %v", ef.UblkFrontend.UblkID, ublkDevice.ID)
 		}
 	}
