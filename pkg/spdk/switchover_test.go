@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -306,6 +307,120 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevRollbackFailure(c 
 	case <-updateCh:
 	default:
 		c.Fatal("expected update notification after rollback failure")
+	}
+}
+
+func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevInProgressGuard(c *C) {
+	fmt.Println("Testing EngineFrontend.SwitchOverTarget in-progress guard for SPDK TCP Blockdev frontend")
+
+	updateCh := make(chan interface{}, 2)
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, updateCh)
+	ef.State = lhtypes.InstanceStateSuspended
+	ef.EngineIP = "10.0.0.1"
+	ef.NvmeTcpFrontend.TargetIP = "10.0.0.1"
+	ef.NvmeTcpFrontend.TargetPort = 2000
+	ef.NvmeTcpFrontend.Nqn = helpertypes.GetNQN("engine-a")
+	ef.NvmeTcpFrontend.Nguid = generateNGUID("engine-a")
+	ef.initiator = &initiator.Initiator{NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
+	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
+
+	enteredCh := make(chan struct{}, 1)
+	releaseCh := make(chan struct{})
+	ef.startNvmeTCPInitiatorFn = func(transportAddress, transportServiceID string, dmDeviceAndEndpointCleanupRequired bool, stop bool) (bool, error) {
+		enteredCh <- struct{}{}
+		<-releaseCh
+		return false, nil
+	}
+
+	firstErrCh := make(chan error, 1)
+	go func() {
+		firstErrCh <- ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	}()
+
+	select {
+	case <-enteredCh:
+	case <-time.After(2 * time.Second):
+		c.Fatal("timeout waiting for first switchover to enter phase-2")
+	}
+
+	// While first switchover is in phase-2, read operations should remain responsive.
+	getDone := make(chan struct{}, 1)
+	go func() {
+		_ = ef.Get()
+		getDone <- struct{}{}
+	}()
+	select {
+	case <-getDone:
+	case <-time.After(1 * time.Second):
+		c.Fatal("Get() blocked while switchover is in progress")
+	}
+
+	// Concurrent switchover should be rejected by the in-progress guard.
+	err := ef.SwitchOverTarget(nil, "engine-c", "10.0.0.3:3000")
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "already in progress"), Equals, true)
+
+	close(releaseCh)
+	select {
+	case err := <-firstErrCh:
+		c.Assert(err, IsNil)
+	case <-time.After(2 * time.Second):
+		c.Fatal("timeout waiting for first switchover to complete")
+	}
+}
+
+func (s *TestSuite) TestEngineFrontendDeleteRejectedDuringSwitchOver(c *C) {
+	fmt.Println("Testing EngineFrontend.Delete is rejected while switch over is in progress")
+
+	updateCh := make(chan interface{}, 2)
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, updateCh)
+	ef.State = lhtypes.InstanceStateSuspended
+	ef.EngineIP = "10.0.0.1"
+	ef.NvmeTcpFrontend.TargetIP = "10.0.0.1"
+	ef.NvmeTcpFrontend.TargetPort = 2000
+	ef.NvmeTcpFrontend.Nqn = helpertypes.GetNQN("engine-a")
+	ef.NvmeTcpFrontend.Nguid = generateNGUID("engine-a")
+	ef.initiator = &initiator.Initiator{NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
+	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
+
+	enteredCh := make(chan struct{}, 1)
+	releaseCh := make(chan struct{})
+	ef.startNvmeTCPInitiatorFn = func(transportAddress, transportServiceID string, dmDeviceAndEndpointCleanupRequired bool, stop bool) (bool, error) {
+		enteredCh <- struct{}{}
+		<-releaseCh
+		return false, nil
+	}
+
+	switchErrCh := make(chan error, 1)
+	go func() {
+		switchErrCh <- ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	}()
+
+	select {
+	case <-enteredCh:
+	case <-time.After(2 * time.Second):
+		c.Fatal("timeout waiting for switchover to enter phase-2")
+	}
+
+	deleteErrCh := make(chan error, 1)
+	go func() {
+		deleteErrCh <- ef.Delete(nil)
+	}()
+
+	select {
+	case err := <-deleteErrCh:
+		c.Assert(err, NotNil)
+		c.Assert(strings.Contains(err.Error(), "switching over target"), Equals, true)
+	case <-time.After(1 * time.Second):
+		c.Fatal("Delete() blocked while switchover is in progress")
+	}
+
+	close(releaseCh)
+	select {
+	case err := <-switchErrCh:
+		c.Assert(err, IsNil)
+	case <-time.After(2 * time.Second):
+		c.Fatal("timeout waiting for switchover to complete")
 	}
 }
 
