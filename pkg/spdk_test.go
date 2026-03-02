@@ -1637,7 +1637,7 @@ func monitoringRetryOpts(ctx context.Context, attempts uint) []retry.Option {
 }
 
 func waitForSPDKTargetStopped() error {
-	return waitForSPDKTargetStoppedWithTimeout(6*time.Second, spdkTargetStopPollInterval)
+	return waitForSPDKTargetDaemonStoppedWithTimeout(6*time.Second, spdkTargetStopPollInterval)
 }
 
 func withRuntimeMonitoringTestEnv(c *C, diskDriverName string, testFn func(env *runtimeMonitoringTestEnv)) {
