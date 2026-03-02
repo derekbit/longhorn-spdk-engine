@@ -2652,17 +2652,15 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 	}
 
 	s.Lock()
-	ef, ok := s.engineFrontendMap[req.Name]
+	_, ok := s.engineFrontendMap[req.Name]
 	if ok {
 		s.Unlock()
 		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine frontend %v already exists", req.Name)
 	}
 
-	if ef == nil {
-		s.engineFrontendMap[req.Name] = NewEngineFrontend(req.Name, req.EngineName, req.VolumeName, req.Frontend, req.SpecSize,
-			req.UblkQueueDepth, req.UblkNumberOfQueue, s.updateChs[types.InstanceTypeEngineFrontend])
-		ef = s.engineFrontendMap[req.Name]
-	}
+	ef := NewEngineFrontend(req.Name, req.EngineName, req.VolumeName, req.Frontend, req.SpecSize,
+		req.UblkQueueDepth, req.UblkNumberOfQueue, s.updateChs[types.InstanceTypeEngineFrontend])
+	s.engineFrontendMap[req.Name] = ef
 
 	spdkClient := s.spdkClient
 	s.Unlock()

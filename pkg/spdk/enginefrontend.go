@@ -448,7 +448,7 @@ func (ef *EngineFrontend) isNvmeTcpFrontendConfigured() bool {
 
 func (ef *EngineFrontend) createUblkFrontend(spdkClient *spdkclient.Client) (err error) {
 	if ef.UblkFrontend == nil {
-		return fmt.Errorf("failed to createUblkFrontend: invalid NvmeTcpFrontend: %v", ef.NvmeTcpFrontend)
+		return fmt.Errorf("failed to createUblkFrontend: invalid UblkFrontend: %v", ef.UblkFrontend)
 	}
 	dmDeviceIsBusy := false
 
@@ -493,9 +493,9 @@ func (ef *EngineFrontend) isNewNvmeTcpFrontendEngine() bool {
 }
 
 func (ef *EngineFrontend) isInitiatorCreationRequired(targetIP string) (bool, error) {
-	// if types.IsUblkFrontend(ef.Frontend) {
-	// 	return true, nil
-	// }
+	if types.IsUblkFrontend(ef.Frontend) {
+		return true, nil
+	}
 
 	if ef.NvmeTcpFrontend == nil {
 		return false, fmt.Errorf("failed to isInitiatorCreationRequired: invalid NvmeTcpFrontend: %v", ef.NvmeTcpFrontend)
@@ -510,18 +510,21 @@ func (ef *EngineFrontend) isInitiatorCreationRequired(targetIP string) (bool, er
 func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Client, size uint64, superiorPortAllocator *commonbitmap.Bitmap) (retErr error) {
 	ef.log.Info("Expanding engine frontend")
 
+	// Phase 1: Acquire lock to read state and check expansion guards.
 	ef.Lock()
 	originalSize := ef.SpecSize
-	requireUpdate := false
-	defer func() {
-		ef.Unlock()
-		if requireUpdate {
-			ef.UpdateCh <- nil
-		}
-	}()
+	engineIP := ef.EngineIP
+	engineName := ef.EngineName
+	frontend := ef.Frontend
 
-	engineSpdkClient, err := GetServiceClient(net.JoinHostPort(ef.EngineIP, strconv.Itoa(types.SPDKServicePort)))
+	var targetAddress string
+	if ef.NvmeTcpFrontend != nil {
+		targetAddress = net.JoinHostPort(ef.NvmeTcpFrontend.TargetIP, strconv.Itoa(int(ef.NvmeTcpFrontend.TargetPort)))
+	}
+
+	engineSpdkClient, err := GetServiceClient(net.JoinHostPort(engineIP, strconv.Itoa(types.SPDKServicePort)))
 	if err != nil {
+		ef.Unlock()
 		return errors.Wrapf(err, "failed to get SPDK client to expand engine frontend %v", ef.Name)
 	}
 	defer func() {
@@ -532,8 +535,11 @@ func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Cli
 
 	requireExpansion, err := ef.requireExpansion(ctx, engineSpdkClient, size)
 	if err != nil {
+		ef.Unlock()
 		return errors.Wrap(err, "failed to check whether expansion is required")
 	}
+	ef.Unlock()
+	// Phase 1 ends: lock released.
 
 	// engineErr will be set when the engine failed to do any non-recoverable operations.
 	expanded := false
@@ -545,8 +551,13 @@ func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Cli
 			}).Errorf("Recovered panic during engine frontend %s expansion: %v", ef.Name, r)
 			retErr = errors.Wrapf(fmt.Errorf("%v", r), "panic during engine frontend %s expansion", ef.Name)
 		}
+
+		// Phase 3: Re-acquire lock to update state.
+		ef.Lock()
 		ef.finishExpansion(originalSize, expanded, size, retErr)
-		requireUpdate = true
+		ef.Unlock()
+
+		ef.UpdateCh <- nil
 	}()
 
 	if !requireExpansion {
@@ -555,31 +566,36 @@ func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Cli
 		return nil
 	}
 
+	// Phase 2: Long-running operations without lock.
 	suspended, err := ef.prepareExpansion(spdkClient)
 	if err != nil {
 		return errors.Wrap(err, "prepare raid for expansion failed")
 	}
 	if suspended {
 		defer func() {
-			if frontendErr := ef.initiator.Resume(); frontendErr != nil {
-				retErr = multierr.Append(retErr, errors.Wrapf(frontendErr, "original error; resume failed"))
+			if ef.initiator != nil {
+				if frontendErr := ef.initiator.Resume(); frontendErr != nil {
+					retErr = multierr.Append(retErr, errors.Wrapf(frontendErr, "original error; resume failed"))
+				}
 			}
 		}()
 	}
 
-	if err := engineSpdkClient.EngineExpand(ctx, ef.EngineName, size); err != nil {
-		return errors.Wrapf(err, "failed to expand engine %v", ef.Name)
+	if err := engineSpdkClient.EngineExpand(ctx, engineName, size); err != nil {
+		return errors.Wrapf(err, "failed to expand engine %v", engineName)
 	}
 
-	if err := ef.handleFrontend(spdkClient, net.JoinHostPort(ef.NvmeTcpFrontend.TargetIP, strconv.Itoa(int(ef.NvmeTcpFrontend.TargetPort)))); err != nil {
-		return errors.Wrap(err, "failed to handle frontend")
+	if targetAddress != "" {
+		if err := ef.handleFrontend(spdkClient, targetAddress); err != nil {
+			return errors.Wrap(err, "failed to handle frontend")
+		}
 	}
 
 	// It waits for the kernel to recognize the new physical NVMe capacity
 	// and then reloads the dm table to propagate the size change up to the volume.
-	if ef.Frontend != types.FrontendEmpty && ef.initiator != nil {
+	if frontend != types.FrontendEmpty && ef.initiator != nil {
 		if err := ef.initiator.SyncDmDeviceSize(size); err != nil {
-			ef.log.WithError(err).Warnf("failed to sync linear dm device size during engine %s expansion", ef.Name)
+			ef.log.WithError(err).Warnf("failed to sync linear dm device size during engine %s expansion", engineName)
 		}
 	}
 
