@@ -56,6 +56,7 @@ type EngineFrontend struct {
 
 	isCreating            bool
 	isSwitchingOver       bool
+	isReplicaAdding       bool
 	isExpanding           bool
 	lastExpansionFailedAt string
 	lastExpansionError    string
@@ -888,6 +889,18 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		ef.Unlock()
 		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s target switchover is already in progress", ef.Name)
 	}
+	if ef.isReplicaAdding {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s replica add is in progress", ef.Name)
+	}
+	if ef.isExpanding {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s expansion is in progress", ef.Name)
+	}
+	if ef.IsRestoring {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s restore is in progress", ef.Name)
+	}
 	if ef.NvmeTcpFrontend == nil {
 		ef.Unlock()
 		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "invalid NvmeTcpFrontend for engine frontend %s switchover", ef.Name)
@@ -1265,10 +1278,15 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 		ef.Unlock()
 		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s is switching over target", ef.Name)
 	}
+	if ef.isReplicaAdding {
+		ef.Unlock()
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s replica add is in progress", ef.Name)
+	}
 	if ef.State != types.InstanceStateRunning {
 		ef.Unlock()
 		return fmt.Errorf("invalid state %v for engine frontend %s replica %s add", ef.State, ef.Name, dstReplicaName)
 	}
+	ef.isReplicaAdding = true
 	engineName := ef.EngineName
 	engineIP := ef.EngineIP
 	if ef.State != types.InstanceStateError {
@@ -1278,6 +1296,9 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 
 	engineSpdkClient, err := GetServiceClient(net.JoinHostPort(engineIP, strconv.Itoa(types.SPDKServicePort)))
 	if err != nil {
+		ef.Lock()
+		ef.isReplicaAdding = false
+		ef.Unlock()
 		wrappedErr := errors.Wrapf(err, "failed to get SPDK client for engine frontend %v replica add", engineName)
 		ef.setReplicaAddError(wrappedErr)
 		return wrappedErr
@@ -1291,6 +1312,9 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 	// NOTE: Engine and EngineFrontend may run on different nodes.
 	// Replica-add execution must happen on the Engine node.
 	if err := engineSpdkClient.EngineReplicaAddStart(engineName, dstReplicaName, dstReplicaAddress); err != nil {
+		ef.Lock()
+		ef.isReplicaAdding = false
+		ef.Unlock()
 		wrappedErr := errors.Wrapf(err, "failed to start replica add %s on engine %s", dstReplicaName, engineName)
 		ef.setReplicaAddError(wrappedErr)
 		return wrappedErr
@@ -1301,6 +1325,12 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 }
 
 func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaName, dstReplicaAddress string) {
+	defer func() {
+		ef.Lock()
+		ef.isReplicaAdding = false
+		ef.Unlock()
+	}()
+
 	engineSpdkClient, err := GetServiceClient(net.JoinHostPort(engineIP, strconv.Itoa(types.SPDKServicePort)))
 	if err != nil {
 		ef.setReplicaAddError(errors.Wrapf(err, "failed to get SPDK client for engine frontend %v replica %s add finish", engineName, dstReplicaName))
