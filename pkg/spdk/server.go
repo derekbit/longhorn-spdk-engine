@@ -13,10 +13,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	grpccodes "google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/longhorn/backupstore"
@@ -457,7 +457,12 @@ func (s *Server) syncVerifiedObjects(state *verifyState) error {
 		}
 	}
 
-	// TODO: validate and update engine targets as well
+	for _, ef := range state.engineFrontendForSync {
+		if err := ef.ValidateAndUpdate(state.spdkClient); err != nil && jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
+			return err
+		}
+	}
+
 	for _, bi := range state.backingImageForSync {
 		if err := bi.ValidateAndUpdate(state.spdkClient); err != nil {
 			if jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {

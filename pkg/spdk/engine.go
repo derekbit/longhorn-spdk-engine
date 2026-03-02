@@ -2745,7 +2745,7 @@ func (e *Engine) validateReplicaStatusMapNoLock(bdevMap map[string]*spdktypes.Bd
 		}
 
 		if replicaStatus.Mode != types.ModeERR {
-			e.log.Infof("Engine validating replica %s with bdev name %s and address %s during ValidateAndUpdate", replicaName, replicaStatus.BdevName, replicaStatus.Address)
+			e.log.Debugf("Engine validating replica %s with bdev name %s and address %s during ValidateAndUpdate", replicaName, replicaStatus.BdevName, replicaStatus.Address)
 			mode, err := e.validateAndUpdateReplicaNvme(replicaName, bdevMap[replicaStatus.BdevName])
 			if err != nil {
 				e.log.WithError(err).Errorf("Engine found valid NVMe for replica %v, will update the mode from %s to ERR during ValidateAndUpdate", replicaName, replicaStatus.Mode)

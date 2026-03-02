@@ -12,13 +12,13 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/longhorn/backupstore"
+	"github.com/longhorn/go-spdk-helper/pkg/initiator"
 
 	btypes "github.com/longhorn/backupstore/types"
 	commonbitmap "github.com/longhorn/go-common-libs/bitmap"
 	commonnet "github.com/longhorn/go-common-libs/net"
 	commonns "github.com/longhorn/go-common-libs/ns"
 	commontypes "github.com/longhorn/go-common-libs/types"
-	"github.com/longhorn/go-spdk-helper/pkg/initiator"
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
 	helperutil "github.com/longhorn/go-spdk-helper/pkg/util"

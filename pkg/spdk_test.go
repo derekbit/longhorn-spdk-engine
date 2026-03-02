@@ -131,7 +131,7 @@ func probeSPDKTargetReady(timeout time.Duration) bool {
 	return true
 }
 
-func waitForSPDKTargetStoppedWithTimeout(timeout, pollInterval time.Duration) error {
+func waitForSPDKTargetDaemonStoppedWithTimeout(timeout, pollInterval time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		running, err := util.IsSPDKTargetProcessRunning()
@@ -148,7 +148,7 @@ func waitForSPDKTargetStoppedWithTimeout(timeout, pollInterval time.Duration) er
 	}
 }
 
-func ensureSPDKTargetStopped(timeout time.Duration) error {
+func ensureSPDKTargetDaemonStopped(timeout time.Duration) error {
 	running, err := util.IsSPDKTargetProcessRunning()
 	if err != nil {
 		return err
@@ -162,16 +162,16 @@ func ensureSPDKTargetStopped(timeout time.Duration) error {
 		return err
 	}
 
-	return waitForSPDKTargetStoppedWithTimeout(timeout, spdkTargetStopPollInterval)
+	return waitForSPDKTargetDaemonStoppedWithTimeout(timeout, spdkTargetStopPollInterval)
 }
 
-func LaunchTestSPDKTarget(c *C, execute func(envs []string, name string, args []string, timeout time.Duration) (string, error)) {
-	err := ensureSPDKTargetStopped(spdkTargetStopGracePeriod)
+func LaunchTestSPDKTargetDaemon(c *C, execute func(envs []string, name string, args []string, timeout time.Duration) (string, error)) {
+	err := ensureSPDKTargetDaemonStopped(spdkTargetStopGracePeriod)
 	c.Assert(err, IsNil)
 
 	targetReady := false
 	go func() {
-		logrus.Info("Starting SPDK target")
+		logrus.Info("Starting SPDK target daemon")
 		err := startTarget("", []string{"--logflag all", "2>&1 | tee /tmp/spdk_tgt.log"}, execute)
 		c.Assert(err, IsNil)
 	}()
@@ -191,7 +191,7 @@ func LaunchTestSPDKTarget(c *C, execute func(envs []string, name string, args []
 // This helper allows tests to access the server instance for advanced testing scenarios (e.g. error injection).
 func launchTestSPDKGRPCServer(ctx context.Context, c *C, ip string, execute func(envs []string, name string, args []string, timeout time.Duration) (string, error), wg *sync.WaitGroup) *server.Server {
 
-	LaunchTestSPDKTarget(c, execute)
+	LaunchTestSPDKTargetDaemon(c, execute)
 	srv, err := server.NewServer(ctx, defaultTestStartPort, defaultTestEndPort)
 	c.Assert(err, IsNil)
 
@@ -213,10 +213,10 @@ func launchTestSPDKGRPCServer(ctx context.Context, c *C, ip string, execute func
 		// Need to improve the error handling, but we can ignore it for now.
 		if err := util.ForceStopSPDKTgtDaemon(120 * time.Second); err != nil &&
 			!strings.Contains(err.Error(), "process with cmdline spdk_tgt is not found") {
-			logrus.WithError(err).Warn("Failed to force stop SPDK target")
+			logrus.WithError(err).Warn("Failed to force stop SPDK target daemon")
 		}
-		if err := waitForSPDKTargetStoppedWithTimeout(spdkTargetStopGracePeriod, spdkTargetStopPollInterval); err != nil {
-			logrus.WithError(err).Warn("SPDK target is still running after stop")
+		if err := waitForSPDKTargetDaemonStoppedWithTimeout(spdkTargetStopGracePeriod, spdkTargetStopPollInterval); err != nil {
+			logrus.WithError(err).Warn("SPDK target daemon is still running after stop")
 		}
 	}()
 	spdkrpc.RegisterSPDKServiceServer(spdkGRPCServer, srv)
