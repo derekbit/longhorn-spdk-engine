@@ -803,9 +803,16 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 	if i.NVMeTCPInfo == nil {
 		return fmt.Errorf("failed to loadNVMeDeviceInfoWithoutLock because nvmeTCPInfo is nil")
 	}
+	usedFallback := false
 	nvmeDevices, err := GetDevices(transportAddress, transportServiceID, subsystemNQN, i.executor)
 	if err != nil {
-		return err
+		i.logger.WithError(err).Warnf("Failed to load NVMe device info by strict target match %s:%s for initiator %s, falling back to subsystem-level lookup",
+			transportAddress, transportServiceID, i.Name)
+		usedFallback = true
+		nvmeDevices, err = GetDevices("", "", subsystemNQN, i.executor)
+		if err != nil {
+			return errors.Wrapf(err, "fallback subsystem-level lookup failed after strict target lookup failure")
+		}
 	}
 	if len(nvmeDevices) != 1 {
 		return fmt.Errorf("found zero or multiple devices NVMe/TCP initiator %s", i.Name)
@@ -819,7 +826,7 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 
 	controller := selectControllerForTarget(nvmeDevices[0].Controllers, transportAddress, transportServiceID)
 
-	isSubsystemLevelLookup := transportAddress == "" && transportServiceID == ""
+	isSubsystemLevelLookup := (transportAddress == "" && transportServiceID == "") || usedFallback
 	if isSubsystemLevelLookup && i.NVMeTCPInfo.ControllerName != "" && i.NVMeTCPInfo.ControllerName != controller.Controller {
 		for _, c := range nvmeDevices[0].Controllers {
 			if c.Controller == i.NVMeTCPInfo.ControllerName {
@@ -834,7 +841,7 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 			i.logger.WithFields(logrus.Fields{
 				"detectedController": controller.Controller,
 				"recordedController": i.NVMeTCPInfo.ControllerName,
-				"subsystemNQN":      subsystemNQN,
+				"subsystemNQN":       subsystemNQN,
 			}).Warnf("Detected controller differs from recorded value during subsystem-level lookup, updating recorded controller for NVMe/TCP initiator %s", i.Name)
 		} else {
 			return fmt.Errorf("found mismatching between the detected controller name %s and the recorded value %s for NVMe/TCP initiator %s", controller.Controller, i.NVMeTCPInfo.ControllerName, i.Name)

@@ -32,6 +32,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetNvmfSuccess(c *C) {
 	ef.NvmeTcpFrontend.TargetIP = "10.0.0.1"
 	ef.NvmeTcpFrontend.TargetPort = 2000
 	ef.Endpoint = GetNvmfEndpoint(ef.NvmeTcpFrontend.Nqn, ef.NvmeTcpFrontend.TargetIP, ef.NvmeTcpFrontend.TargetPort)
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
 	c.Assert(err, IsNil)
@@ -40,7 +41,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetNvmfSuccess(c *C) {
 	c.Assert(ef.NvmeTcpFrontend.TargetIP, Equals, "10.0.0.2")
 	c.Assert(ef.NvmeTcpFrontend.TargetPort, Equals, int32(3000))
 
-	expectedNQN := helpertypes.GetNQN("engine-b")
+	expectedNQN := helpertypes.GetNQN("vol-a")
 	c.Assert(ef.NvmeTcpFrontend.Nqn, Equals, expectedNQN)
 
 	expectedEndpoint := GetNvmfEndpoint(expectedNQN, "10.0.0.2", 3000)
@@ -58,10 +59,11 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevRequiresSuspended(
 
 	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
 	ef.State = lhtypes.InstanceStateRunning
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "must be suspended"), Equals, true)
+	c.Assert(strings.Contains(err.Error(), "initiator is missing"), Equals, true)
 }
 
 func (s *TestSuite) TestEngineFrontendSuspendIdempotent(c *C) {
@@ -82,6 +84,7 @@ func (s *TestSuite) TestServerEngineFrontendSwitchOverLookupByEngineName(c *C) {
 	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPNvmf, 1024, 0, 0, updateCh)
 	ef.State = lhtypes.InstanceStateRunning
 	ef.NvmeTcpFrontend.Nqn = "nqn.2014-08.org.nvmexpress:uuid:test-a"
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	srv := &Server{
 		engineFrontendMap: map[string]*EngineFrontend{
@@ -224,6 +227,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetResolveEngineNameFallback(
 	ef.resolveEngineNameByTargetAddressFn = func(targetAddress string) (string, error) {
 		return "engine-c", nil
 	}
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	err := ef.SwitchOverTarget(nil, "", "10.0.0.2:3000")
 	c.Assert(err, IsNil)
@@ -242,6 +246,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevNoOpWithoutSuspend
 	ef.NvmeTcpFrontend.Nqn = helpertypes.GetNQN("engine-a")
 	ef.NvmeTcpFrontend.Nguid = generateNGUID("engine-a")
 	ef.Endpoint = "/dev/longhorn/vol-a"
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	resolveCalled := false
 	ef.resolveEngineNameByTargetAddressFn = func(targetAddress string) (string, error) {
@@ -287,6 +292,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevRollbackSuccess(c 
 		Endpoint:    oldEndpoint,
 		NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: oldNQN},
 	}
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	var callTargets []string
 	ef.startNvmeTCPInitiatorFn = func(transportAddress, transportServiceID string, dmDeviceAndEndpointCleanupRequired bool, stop bool) (bool, error) {
@@ -337,6 +343,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevRollbackFailure(c 
 	ef.initiator = &initiator.Initiator{
 		NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn},
 	}
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	callCount := 0
 	ef.startNvmeTCPInitiatorFn = func(transportAddress, transportServiceID string, dmDeviceAndEndpointCleanupRequired bool, stop bool) (bool, error) {
@@ -373,6 +380,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevInProgressGuard(c 
 	ef.NvmeTcpFrontend.Nguid = generateNGUID("engine-a")
 	ef.initiator = &initiator.Initiator{NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
 	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	enteredCh := make(chan struct{}, 1)
 	releaseCh := make(chan struct{})
@@ -432,6 +440,7 @@ func (s *TestSuite) TestEngineFrontendDeleteRejectedDuringSwitchOver(c *C) {
 	ef.NvmeTcpFrontend.Nguid = generateNGUID("engine-a")
 	ef.initiator = &initiator.Initiator{NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
 	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
+	ef.setRemoteListenerANAStateFn = func(targetIP string, targetPort int32, nqn, anaState string) error { return nil }
 
 	enteredCh := make(chan struct{}, 1)
 	releaseCh := make(chan struct{})

@@ -1486,6 +1486,19 @@ func (s *Server) NvmfSubsystemListenerSetAnaState(ctx context.Context, req *spdk
 		if strings.EqualFold(string(listener.AnaState), anaState) {
 			return &emptypb.Empty{}, nil
 		}
+		// When ANA reporting is not enabled on the subsystem (or not
+		// supported by the SPDK version), the listener response may
+		// contain an empty AnaState. Treat this as a non-fatal
+		// condition: the set-ana-state RPC already returned success.
+		if listener.AnaState == "" {
+			logrus.WithFields(logrus.Fields{
+				"nqn":            req.Nqn,
+				"traddr":         req.Traddr,
+				"trsvcid":        req.Trsvcid,
+				"requestedState": anaState,
+			}).Warn("Listener ANA state is empty after set; ANA reporting may not be enabled on this subsystem")
+			return &emptypb.Empty{}, nil
+		}
 		return nil, grpcstatus.Errorf(grpccodes.Internal,
 			"ANA state mismatch for %s at %s:%d: expected=%s actual=%s",
 			req.Nqn, req.Traddr, req.Trsvcid, anaState, listener.AnaState)
