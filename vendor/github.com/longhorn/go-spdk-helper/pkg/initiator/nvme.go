@@ -3,6 +3,7 @@ package initiator
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
@@ -54,7 +55,73 @@ func ConnectTarget(ip, port, nqn string, executor *commonns.Executor) (controlle
 		return "", err
 	}
 
-	return connect(hostID, hostNQN, nqn, DefaultTransportType, ip, port, executor)
+	controllerName, err = connect(hostID, hostNQN, nqn, DefaultTransportType, ip, port, executor)
+	if err == nil {
+		return controllerName, nil
+	}
+
+	if controllerName, resolveErr := resolveControllerName(ip, port, nqn, executor); resolveErr == nil && controllerName != "" {
+		return controllerName, nil
+	}
+
+	if strings.Contains(strings.ToLower(err.Error()), "already connected") {
+		if controllerName, resolveErr := resolveControllerName(ip, port, nqn, executor); resolveErr == nil && controllerName != "" {
+			return controllerName, nil
+		}
+	}
+
+	return "", err
+}
+
+func resolveControllerName(ip, port, nqn string, executor *commonns.Executor) (string, error) {
+	devices, err := GetDevices(ip, port, nqn, executor)
+	if err == nil {
+		for _, d := range devices {
+			for _, c := range d.Controllers {
+				controllerIP, controllerPort := GetIPAndPortFromControllerAddress(c.Address)
+				if ip != "" && controllerIP != ip {
+					continue
+				}
+				if port != "" && controllerPort != port {
+					continue
+				}
+				if c.Controller != "" {
+					return c.Controller, nil
+				}
+			}
+		}
+	}
+
+	// Fallback: list by NQN only, then match controller address if possible.
+	devices, err = GetDevices("", "", nqn, executor)
+	if err != nil {
+		return "", err
+	}
+
+	for _, d := range devices {
+		for _, c := range d.Controllers {
+			controllerIP, controllerPort := GetIPAndPortFromControllerAddress(c.Address)
+			if ip != "" && controllerIP != ip {
+				continue
+			}
+			if port != "" && controllerPort != port {
+				continue
+			}
+			if c.Controller != "" {
+				return c.Controller, nil
+			}
+		}
+	}
+
+	for _, d := range devices {
+		for _, c := range d.Controllers {
+			if c.Controller != "" {
+				return c.Controller, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("cannot resolve controller name for NQN %s", nqn)
 }
 
 // DisconnectTarget disconnects from a target

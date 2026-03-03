@@ -96,6 +96,7 @@ const (
 	SPDKService_EngineFrontendSnapshotPurge_FullMethodName               = "/spdkrpc.SPDKService/EngineFrontendSnapshotPurge"
 	SPDKService_EngineFrontendReplicaAdd_FullMethodName                  = "/spdkrpc.SPDKService/EngineFrontendReplicaAdd"
 	SPDKService_EngineFrontendSwitchOver_FullMethodName                  = "/spdkrpc.SPDKService/EngineFrontendSwitchOver"
+	SPDKService_NvmfSubsystemListenerSetAnaState_FullMethodName          = "/spdkrpc.SPDKService/NvmfSubsystemListenerSetAnaState"
 	SPDKService_BackingImageCreate_FullMethodName                        = "/spdkrpc.SPDKService/BackingImageCreate"
 	SPDKService_BackingImageDelete_FullMethodName                        = "/spdkrpc.SPDKService/BackingImageDelete"
 	SPDKService_BackingImageGet_FullMethodName                           = "/spdkrpc.SPDKService/BackingImageGet"
@@ -195,6 +196,7 @@ type SPDKServiceClient interface {
 	EngineFrontendSnapshotPurge(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	EngineFrontendReplicaAdd(ctx context.Context, in *EngineFrontendReplicaAddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	EngineFrontendSwitchOver(ctx context.Context, in *EngineFrontendSwitchOverRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	NvmfSubsystemListenerSetAnaState(ctx context.Context, in *NvmfSubsystemListenerSetAnaStateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	BackingImageCreate(ctx context.Context, in *BackingImageCreateRequest, opts ...grpc.CallOption) (*BackingImage, error)
 	BackingImageDelete(ctx context.Context, in *BackingImageDeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	BackingImageGet(ctx context.Context, in *BackingImageGetRequest, opts ...grpc.CallOption) (*BackingImage, error)
@@ -977,6 +979,15 @@ func (c *sPDKServiceClient) EngineFrontendSwitchOver(ctx context.Context, in *En
 	return out, nil
 }
 
+func (c *sPDKServiceClient) NvmfSubsystemListenerSetAnaState(ctx context.Context, in *NvmfSubsystemListenerSetAnaStateRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, SPDKService_NvmfSubsystemListenerSetAnaState_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sPDKServiceClient) BackingImageCreate(ctx context.Context, in *BackingImageCreateRequest, opts ...grpc.CallOption) (*BackingImage, error) {
 	out := new(BackingImage)
 	err := c.cc.Invoke(ctx, SPDKService_BackingImageCreate_FullMethodName, in, out, opts...)
@@ -1233,6 +1244,7 @@ type SPDKServiceServer interface {
 	EngineFrontendSnapshotPurge(context.Context, *SnapshotRequest) (*emptypb.Empty, error)
 	EngineFrontendReplicaAdd(context.Context, *EngineFrontendReplicaAddRequest) (*emptypb.Empty, error)
 	EngineFrontendSwitchOver(context.Context, *EngineFrontendSwitchOverRequest) (*emptypb.Empty, error)
+	NvmfSubsystemListenerSetAnaState(context.Context, *NvmfSubsystemListenerSetAnaStateRequest) (*emptypb.Empty, error)
 	BackingImageCreate(context.Context, *BackingImageCreateRequest) (*BackingImage, error)
 	BackingImageDelete(context.Context, *BackingImageDeleteRequest) (*emptypb.Empty, error)
 	BackingImageGet(context.Context, *BackingImageGetRequest) (*BackingImage, error)
@@ -1486,6 +1498,9 @@ func (UnimplementedSPDKServiceServer) EngineFrontendReplicaAdd(context.Context, 
 }
 func (UnimplementedSPDKServiceServer) EngineFrontendSwitchOver(context.Context, *EngineFrontendSwitchOverRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineFrontendSwitchOver not implemented")
+}
+func (UnimplementedSPDKServiceServer) NvmfSubsystemListenerSetAnaState(context.Context, *NvmfSubsystemListenerSetAnaStateRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NvmfSubsystemListenerSetAnaState not implemented")
 }
 func (UnimplementedSPDKServiceServer) BackingImageCreate(context.Context, *BackingImageCreateRequest) (*BackingImage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BackingImageCreate not implemented")
@@ -2928,6 +2943,24 @@ func _SPDKService_EngineFrontendSwitchOver_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SPDKService_NvmfSubsystemListenerSetAnaState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NvmfSubsystemListenerSetAnaStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SPDKServiceServer).NvmfSubsystemListenerSetAnaState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SPDKService_NvmfSubsystemListenerSetAnaState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SPDKServiceServer).NvmfSubsystemListenerSetAnaState(ctx, req.(*NvmfSubsystemListenerSetAnaStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SPDKService_BackingImageCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BackingImageCreateRequest)
 	if err := dec(in); err != nil {
@@ -3535,6 +3568,10 @@ var SPDKService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EngineFrontendSwitchOver",
 			Handler:    _SPDKService_EngineFrontendSwitchOver_Handler,
+		},
+		{
+			MethodName: "NvmfSubsystemListenerSetAnaState",
+			Handler:    _SPDKService_NvmfSubsystemListenerSetAnaState_Handler,
 		},
 		{
 			MethodName: "BackingImageCreate",

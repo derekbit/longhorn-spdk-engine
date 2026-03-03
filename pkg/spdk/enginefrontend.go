@@ -21,6 +21,7 @@ import (
 	safelog "github.com/longhorn/longhorn-spdk-engine/pkg/log"
 
 	"github.com/longhorn/go-spdk-helper/pkg/initiator"
+	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
 	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
@@ -426,8 +427,8 @@ func (ef *EngineFrontend) createNvmeTcpFrontend(spdkClient *spdkclient.Client, t
 }
 
 func (ef *EngineFrontend) newNvmeTcpInitiator() (i *initiator.Initiator, nqn, nguid string, err error) {
-	nqn = helpertypes.GetNQN(ef.EngineName)
-	nguid = generateNGUID(ef.EngineName)
+	nqn = getVolumeScopedNQN(ef.VolumeName, ef.EngineName)
+	nguid = getVolumeScopedNGUID(ef.VolumeName, ef.EngineName)
 
 	nvmeTCPInfo := &initiator.NVMeTCPInfo{
 		SubsystemNQN: nqn,
@@ -860,8 +861,9 @@ func (ef *EngineFrontend) Resume(_ *spdkclient.Client) (err error) {
 }
 
 // SwitchOverTarget switches the backend target for an existing engine frontend.
-// For blockdev frontend, the caller must suspend the frontend before switch-over.
 // If newEngineName is empty, the function will try to resolve it via targetAddress.
+// For blockdev frontend this path supports direct live switch-over (without
+// requiring suspend/resume orchestration from the caller).
 func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEngineName, targetAddress string) (err error) {
 	if targetAddress == "" {
 		return errors.Wrapf(ErrSwitchOverTargetInvalidInput, "target address is required for engine frontend %s switchover", ef.Name)
@@ -911,6 +913,7 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 	oldNGUID := ef.NvmeTcpFrontend.Nguid
 	oldEndpoint := ef.Endpoint
 	oldDMDeviceIsBusy := ef.dmDeviceIsBusy
+	oldInitiator := ef.initiator
 	frontend := ef.Frontend
 
 	resolvedEngineName := newEngineName
@@ -919,19 +922,23 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		resolvedEngineName = oldEngineName
 	}
 	if oldTargetIP == targetIP && oldTargetPort == targetPort && oldEngineIP == targetIP && oldEngineName == resolvedEngineName {
+		currentNQN := oldNQN
 		if ef.State != types.InstanceStateError {
 			ef.ErrorMsg = ""
 		}
 		ef.Unlock()
+		if currentNQN != "" {
+			if anaErr := ef.updateListenerANAStatesForSwitchover("", 0, targetIP, targetPort, currentNQN); anaErr != nil {
+				return errors.Wrapf(ErrSwitchOverTargetInternal, "failed to reconcile ANA state for unchanged target during switchover: %v", anaErr)
+			}
+		}
 		return nil
 	}
 
-	if frontend == types.FrontendSPDKTCPBlockdev && ef.State != types.InstanceStateSuspended {
-		state := ef.State
+	if frontend == types.FrontendSPDKTCPBlockdev && oldInitiator == nil {
 		ef.Unlock()
-		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "invalid state %v for engine frontend %s target switchover, must be suspended", state, ef.Name)
+		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "initiator is missing for blockdev engine frontend %s switchover", ef.Name)
 	}
-	initiatorCreationRequired := frontend == types.FrontendSPDKTCPBlockdev && ef.initiator == nil
 	ef.isSwitchingOver = true
 	ef.Unlock()
 
@@ -951,11 +958,15 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 			return errors.Wrapf(err, "failed to resolve engine name for target address %s", targetAddress)
 		}
 	}
-	newNQN := helpertypes.GetNQN(resolvedEngineName)
-	newNGUID := generateNGUID(resolvedEngineName)
+	newNQN := getVolumeScopedNQN(ef.VolumeName, resolvedEngineName)
+	newNGUID := getVolumeScopedNGUID(ef.VolumeName, resolvedEngineName)
 
 	switch frontend {
 	case types.FrontendSPDKTCPNvmf:
+		if anaErr := ef.updateListenerANAStatesForSwitchover(oldTargetIP, oldTargetPort, targetIP, targetPort, newNQN); anaErr != nil {
+			return errors.Wrapf(ErrSwitchOverTargetInternal, "failed to update ANA listener states during switchover: %v", anaErr)
+		}
+
 		ef.Lock()
 		ef.EngineIP = targetIP
 		ef.EngineName = resolvedEngineName
@@ -981,18 +992,6 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		return nil
 
 	case types.FrontendSPDKTCPBlockdev:
-		if initiatorCreationRequired {
-			// Recreate initiator if the cached one is missing but frontend metadata is still valid.
-			i, nqn, nguid, initErr := ef.newNvmeTcpInitiator()
-			if initErr != nil {
-				return errors.Wrapf(ErrSwitchOverTargetInternal, "failed to create initiator for engine frontend %s switchover: %v", ef.Name, initErr)
-			}
-			ef.Lock()
-			ef.initiator = i
-			ef.NvmeTcpFrontend.Nqn = nqn
-			ef.NvmeTcpFrontend.Nguid = nguid
-			ef.Unlock()
-		}
 		// Do NOT overwrite SubsystemNQN before startNvmeTCPInitiator.
 		// The stop path inside startNvmeTCPInitiator uses SubsystemNQN to
 		// disconnect the old NVMe controller. If we set newNQN here, the old
@@ -1001,18 +1000,18 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 		// startNvmeTCPInitiator will set the correct NQN after connecting
 		// the new target via discoverAndConnectNVMeTCPTarget.
 
-		dmDeviceIsBusy, switchErr := ef.startNvmeTCPInitiator(targetIP, targetPort, true, true)
+		dmDeviceIsBusy, switchErr := ef.startNvmeTCPInitiatorWithExistingInitiator(oldInitiator, targetIP, targetPort, false, false)
 		if switchErr != nil {
 			switchErr = errors.Wrapf(ErrSwitchOverTargetInternal, "failed to switch engine frontend %s target to %s: %v", ef.Name, targetAddress, switchErr)
 
 			var rollbackErr error
 			if oldTargetIP != "" && oldTargetPort != 0 {
 				ef.log.WithError(switchErr).Warnf("Failed to switch target, initiating rollback to previous target %s:%d", oldTargetIP, oldTargetPort)
-				if ef.initiator.NVMeTCPInfo != nil {
-					ef.initiator.NVMeTCPInfo.SubsystemNQN = oldNQN
+				if oldInitiator.NVMeTCPInfo != nil {
+					oldInitiator.NVMeTCPInfo.SubsystemNQN = oldNQN
 				}
 				var rollbackDMDeviceIsBusy bool
-				if rollbackDMDeviceIsBusy, rollbackErr = ef.startNvmeTCPInitiator(oldTargetIP, oldTargetPort, true, true); rollbackErr != nil {
+				if rollbackDMDeviceIsBusy, rollbackErr = ef.startNvmeTCPInitiatorWithExistingInitiator(oldInitiator, oldTargetIP, oldTargetPort, false, false); rollbackErr != nil {
 					rollbackErr = errors.Wrapf(ErrSwitchOverTargetInternal, "failed to rollback engine frontend %s target to %s:%d: %v", ef.Name, oldTargetIP, oldTargetPort, rollbackErr)
 					ef.log.WithError(rollbackErr).Errorf("Failed to rollback engine frontend %s target to previous target", ef.Name)
 				} else {
@@ -1044,6 +1043,10 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 			ef.Unlock()
 			updateRequired = true
 			return switchErr
+		}
+
+		if anaErr := ef.updateListenerANAStatesForSwitchover(oldTargetIP, oldTargetPort, targetIP, targetPort, newNQN); anaErr != nil {
+			return errors.Wrapf(ErrSwitchOverTargetInternal, "failed to update ANA listener states during switchover: %v", anaErr)
 		}
 
 		ef.Lock()
@@ -1085,6 +1088,60 @@ func (ef *EngineFrontend) startNvmeTCPInitiator(transportAddress string, transpo
 		return false, errors.Wrapf(ErrSwitchOverTargetInternal, "initiator is nil for engine frontend %s", ef.Name)
 	}
 	return ef.initiator.StartNvmeTCPInitiator(transportAddress, transportServiceID, dmDeviceAndEndpointCleanupRequired, stop)
+}
+
+func (ef *EngineFrontend) startNvmeTCPInitiatorWithExistingInitiator(existingInitiator *initiator.Initiator,
+	transportAddress string, transportPort int32, dmDeviceAndEndpointCleanupRequired bool, stop bool) (bool, error) {
+	transportServiceID := strconv.Itoa(int(transportPort))
+	if existingInitiator == nil {
+		return false, errors.Wrapf(ErrSwitchOverTargetInternal, "existing initiator is nil for engine frontend %s", ef.Name)
+	}
+	if ef.startNvmeTCPInitiatorFn != nil {
+		return ef.startNvmeTCPInitiatorFn(transportAddress, transportServiceID, dmDeviceAndEndpointCleanupRequired, stop)
+	}
+	return existingInitiator.StartNvmeTCPInitiator(transportAddress, transportServiceID, dmDeviceAndEndpointCleanupRequired, stop)
+}
+
+func (ef *EngineFrontend) updateListenerANAStatesForSwitchover(oldTargetIP string, oldTargetPort int32, newTargetIP string, newTargetPort int32, nqn string) error {
+	if nqn == "" {
+		return nil
+	}
+
+	var resultErr error
+
+	if newTargetIP != "" && newTargetPort != 0 {
+		ef.log.WithFields(logrus.Fields{"nqn": nqn, "targetIP": newTargetIP, "targetPort": newTargetPort}).Info("Setting ANA state optimized on new target listener")
+		if err := ef.setRemoteListenerANAState(newTargetIP, newTargetPort, nqn, string(spdktypes.NvmfSubsystemListenerAnaStateOptimized)); err != nil {
+			resultErr = multierr.Append(resultErr, err)
+		}
+	}
+
+	if oldTargetIP != "" && oldTargetPort != 0 && (oldTargetIP != newTargetIP || oldTargetPort != newTargetPort) {
+		ef.log.WithFields(logrus.Fields{"nqn": nqn, "targetIP": oldTargetIP, "targetPort": oldTargetPort}).Info("Setting ANA state non-optimized on old target listener")
+		if err := ef.setRemoteListenerANAState(oldTargetIP, oldTargetPort, nqn, string(spdktypes.NvmfSubsystemListenerAnaStateNonOptimized)); err != nil {
+			resultErr = multierr.Append(resultErr, err)
+		}
+	}
+
+	return resultErr
+}
+
+func (ef *EngineFrontend) setRemoteListenerANAState(targetIP string, targetPort int32, nqn, anaState string) error {
+	serviceClient, err := GetServiceClient(net.JoinHostPort(targetIP, strconv.Itoa(int(targetPort))))
+	if err != nil {
+		return errors.Wrapf(err, "failed to get service client for ANA state update at %s:%d", targetIP, targetPort)
+	}
+	defer func() {
+		if errClose := serviceClient.Close(); errClose != nil {
+			ef.log.WithError(errClose).Error("Failed to close target SPDK client")
+		}
+	}()
+
+	if err := serviceClient.NvmfSubsystemListenerSetAnaState(nqn, targetIP, targetPort, anaState); err != nil {
+		return errors.Wrapf(err, "failed to set ANA state %s for %s at %s:%d", anaState, nqn, targetIP, targetPort)
+	}
+
+	return nil
 }
 
 func (ef *EngineFrontend) getInitiatorEndpoint() string {

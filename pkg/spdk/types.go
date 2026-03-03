@@ -14,6 +14,8 @@ import (
 
 	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
+	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
+
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
 
@@ -337,4 +339,18 @@ func generateNGUID(name string) string {
 	nguid := uuid.NewSHA1(uuid.NameSpaceOID, []byte(name))
 	return hex.EncodeToString(nguid[:]) // 32-char hex
 
+}
+
+func getVolumeScopedNQN(volumeName, fallbackName string) string {
+	if volumeName != "" {
+		return helpertypes.GetNQN(volumeName)
+	}
+	return helpertypes.GetNQN(fallbackName)
+}
+
+func getVolumeScopedNGUID(volumeName, fallbackName string) string {
+	if volumeName != "" {
+		return generateNGUID(volumeName)
+	}
+	return generateNGUID(fallbackName)
 }

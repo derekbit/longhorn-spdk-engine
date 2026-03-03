@@ -30,6 +30,7 @@ const (
 	RespErrorCodeNoSuchProcess = -3
 	RespErrorCodeNoFileExists  = -17
 	RespErrorCodeNoSuchDevice  = -19
+	RespErrorCodeInvalidParams = -32602
 )
 
 type Response struct {
@@ -128,4 +129,17 @@ func IsJSONRPCRespErrorTransportTypeAlreadyExists(err error) bool {
 	}
 	matched, _ := regexp.MatchString("Transport type .* already exists", jsonRPCError.ErrorDetail.Error())
 	return matched
+}
+
+func IsJSONRPCRespErrorInvalidParams(err error) bool {
+	jsonRPCError, ok := err.(JSONClientError)
+	if !ok {
+		return false
+	}
+	responseError, ok := jsonRPCError.ErrorDetail.(*ResponseError)
+	if !ok {
+		return false
+	}
+
+	return responseError.Code == RespErrorCodeInvalidParams
 }

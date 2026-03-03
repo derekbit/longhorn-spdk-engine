@@ -76,7 +76,7 @@ type NvmfSubsystemNamespace struct {
 	Nguid    string `json:"nguid,omitempty"`
 	Eui64    string `json:"eui64,omitempty"`
 	UUID     string `json:"uuid,omitempty"`
-	Anagrpid string `json:"anagrpid,omitempty"`
+	Anagrpid uint32 `json:"anagrpid,omitempty"`
 	PtplFile string `json:"ptpl_file,omitempty"`
 }
 
@@ -119,14 +119,20 @@ type NvmfSubsystemGetListenersRequest struct {
 type NvmfSubsystemListenerAnaState string
 
 const (
-	NvmfSubsystemListenerAnaStateOptimized      = "optimized"
-	NvmfSubsystemListenerAnaStateNonOptimized   = "non-optimized"
-	NvmfSubsystemListenerAnaStateInaccessible   = "Inaccessible"
-	NvmfSubsystemListenerAnaStatePersistentLoss = "persistent-loss"
-	NvmfSubsystemListenerAnaStateChange         = "change"
+	NvmfSubsystemListenerAnaStateOptimized    = "optimized"
+	NvmfSubsystemListenerAnaStateNonOptimized = "non_optimized"
+	NvmfSubsystemListenerAnaStateInaccessible = "inaccessible"
 )
 
 type NvmfSubsystemListener struct {
 	Address  NvmfSubsystemListenAddress    `json:"address"`
 	AnaState NvmfSubsystemListenerAnaState `json:"ana_state"`
+}
+
+type NvmfSubsystemListenerSetAnaStateRequest struct {
+	Nqn           string                        `json:"nqn"`
+	ListenAddress NvmfSubsystemListenAddress    `json:"listen_address"`
+	AnaState      NvmfSubsystemListenerAnaState `json:"ana_state"`
+	AnaGroupID    uint32                        `json:"anagrpid,omitempty"`
+	TgtName       string                        `json:"tgt_name,omitempty"`
 }

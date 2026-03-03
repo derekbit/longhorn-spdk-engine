@@ -770,6 +770,28 @@ func (c *SPDKClient) EngineFrontendSwitchOverWithOptions(name, newEngineName, ne
 	return c.EngineFrontendSwitchOver(name, newEngineName, newTargetAddress)
 }
 
+func (c *SPDKClient) NvmfSubsystemListenerSetAnaState(nqn, traddr string, trsvcid int32, anaState string) error {
+	if nqn == "" || traddr == "" || trsvcid == 0 || anaState == "" {
+		return fmt.Errorf("failed to set ANA state: missing required parameters")
+	}
+
+	client := c.getSPDKServiceClient()
+	ctx, cancel := context.WithTimeout(context.Background(), GRPCServiceTimeout)
+	defer cancel()
+
+	_, err := client.NvmfSubsystemListenerSetAnaState(ctx, &spdkrpc.NvmfSubsystemListenerSetAnaStateRequest{
+		Nqn:      nqn,
+		Traddr:   traddr,
+		Trsvcid:  trsvcid,
+		AnaState: anaState,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "failed to set ANA state %s for %s at %s:%d", anaState, nqn, traddr, trsvcid)
+	}
+
+	return nil
+}
+
 func (c *SPDKClient) EngineFrontendSuspend(name string) error {
 	if name == "" {
 		return fmt.Errorf("failed to suspend engine frontend: missing required parameter")

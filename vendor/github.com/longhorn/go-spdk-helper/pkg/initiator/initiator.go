@@ -404,7 +404,11 @@ func (i *Initiator) StartNvmeTCPInitiator(transportAddress, transportServiceID s
 			}
 			i.logger.WithError(err).Warnf("NVMe/TCP initiator is launched with failed to load the endpoint")
 		} else {
-			i.logger.Warnf("NVMe/TCP initiator is launched but with incorrect address, the required one is %s:%s, will try to stop then relaunch it", transportAddress, transportServiceID)
+			if stop {
+				i.logger.Warnf("NVMe/TCP initiator is launched but with incorrect address, the required one is %s:%s, will try to stop then relaunch it", transportAddress, transportServiceID)
+			} else {
+				i.logger.Warnf("NVMe/TCP initiator is launched but with incorrect address, the required one is %s:%s, will perform live connect without pre-stop", transportAddress, transportServiceID)
+			}
 		}
 	}
 
@@ -472,8 +476,16 @@ func (i *Initiator) createEndpoint() error {
 		return errors.Wrapf(err, "failed to check if endpoint %v exists for NVMe/TCP initiator %s", i.Endpoint, i.Name)
 	}
 	if exist {
-		i.logger.Infof("Skipping endpoint %v creation for NVMe/TCP initiator", i.Endpoint)
-		return nil
+		dev, err := util.DetectDevice(i.Endpoint, i.executor)
+		if err == nil && i.dev != nil && dev.Major == i.dev.Export.Major && dev.Minor == i.dev.Export.Minor {
+			i.logger.Infof("Skipping endpoint %v creation for NVMe/TCP initiator", i.Endpoint)
+			return nil
+		}
+
+		i.logger.Infof("Refreshing endpoint %v for NVMe/TCP initiator", i.Endpoint)
+		if err := util.RemoveDevice(i.Endpoint); err != nil {
+			return errors.Wrapf(err, "failed to refresh endpoint %v for NVMe/TCP initiator %s", i.Endpoint, i.Name)
+		}
 	}
 
 	if err := i.makeEndpoint(); err != nil {
@@ -801,16 +813,41 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 	if len(nvmeDevices[0].Namespaces) != 1 {
 		return fmt.Errorf("found zero or multiple devices for NVMe/TCP initiator %s", i.Name)
 	}
-	if i.NVMeTCPInfo.ControllerName != "" && i.NVMeTCPInfo.ControllerName != nvmeDevices[0].Controllers[0].Controller {
-		return fmt.Errorf("found mismatching between the detected controller name %s and the recorded value %s for NVMe/TCP initiator %s", nvmeDevices[0].Controllers[0].Controller, i.NVMeTCPInfo.ControllerName, i.Name)
+	if len(nvmeDevices[0].Controllers) == 0 {
+		return fmt.Errorf("found no controllers for NVMe/TCP initiator %s", i.Name)
 	}
 
-	i.NVMeTCPInfo.ControllerName = nvmeDevices[0].Controllers[0].Controller
+	controller := selectControllerForTarget(nvmeDevices[0].Controllers, transportAddress, transportServiceID)
+
+	isSubsystemLevelLookup := transportAddress == "" && transportServiceID == ""
+	if isSubsystemLevelLookup && i.NVMeTCPInfo.ControllerName != "" && i.NVMeTCPInfo.ControllerName != controller.Controller {
+		for _, c := range nvmeDevices[0].Controllers {
+			if c.Controller == i.NVMeTCPInfo.ControllerName {
+				controller = c
+				break
+			}
+		}
+	}
+
+	if i.NVMeTCPInfo.ControllerName != "" && i.NVMeTCPInfo.ControllerName != controller.Controller {
+		if isSubsystemLevelLookup {
+			i.logger.WithFields(logrus.Fields{
+				"detectedController": controller.Controller,
+				"recordedController": i.NVMeTCPInfo.ControllerName,
+				"subsystemNQN":      subsystemNQN,
+			}).Warnf("Detected controller differs from recorded value during subsystem-level lookup, updating recorded controller for NVMe/TCP initiator %s", i.Name)
+		} else {
+			return fmt.Errorf("found mismatching between the detected controller name %s and the recorded value %s for NVMe/TCP initiator %s", controller.Controller, i.NVMeTCPInfo.ControllerName, i.Name)
+		}
+	}
+
+	i.NVMeTCPInfo.ControllerName = controller.Controller
 	i.NVMeTCPInfo.NamespaceName = nvmeDevices[0].Namespaces[0].NameSpace
-	i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID = GetIPAndPortFromControllerAddress(nvmeDevices[0].Controllers[0].Address)
+	i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID = GetIPAndPortFromControllerAddress(controller.Address)
 	i.logger = i.logger.WithFields(logrus.Fields{
 		"controllerName":     i.NVMeTCPInfo.ControllerName,
 		"namespaceName":      i.NVMeTCPInfo.NamespaceName,
+		"controllerState":    controller.State,
 		"transportAddress":   i.NVMeTCPInfo.TransportAddress,
 		"transportServiceID": i.NVMeTCPInfo.TransportServiceID,
 	})
@@ -825,6 +862,57 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 		Source: *dev,
 	}
 	return nil
+}
+
+func selectPreferredController(controllers []Controller) Controller {
+	selected := controllers[0]
+	bestScore := controllerStateScore(selected.State)
+
+	for _, c := range controllers[1:] {
+		score := controllerStateScore(c.State)
+		if score > bestScore {
+			selected = c
+			bestScore = score
+		}
+	}
+
+	return selected
+}
+
+func selectControllerForTarget(controllers []Controller, transportAddress, transportServiceID string) Controller {
+	if transportAddress != "" || transportServiceID != "" {
+		matched := []Controller{}
+		for _, c := range controllers {
+			controllerIP, controllerPort := GetIPAndPortFromControllerAddress(c.Address)
+			if transportAddress != "" && controllerIP != transportAddress {
+				continue
+			}
+			if transportServiceID != "" && controllerPort != transportServiceID {
+				continue
+			}
+			matched = append(matched, c)
+		}
+		if len(matched) > 0 {
+			return selectPreferredController(matched)
+		}
+	}
+
+	return selectPreferredController(controllers)
+}
+
+func controllerStateScore(state string) int {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "live", "optimized", "active":
+		return 4
+	case "non-optimized", "standby":
+		return 3
+	case "connecting":
+		return 2
+	case "inaccessible", "fault", "failed":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (i *Initiator) isNamespaceExist(devices []string) bool {

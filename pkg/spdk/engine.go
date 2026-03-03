@@ -260,8 +260,8 @@ func (e *Engine) createNVMeTCPTarget(spdkClient *spdkclient.Client, superiorPort
 
 	e.NvmeTcpTarget.IP = podIP
 	e.NvmeTcpTarget.Port = port
-	e.NvmeTcpTarget.Nguid = generateNGUID(e.Name)
-	e.NvmeTcpTarget.Nqn = helpertypes.GetNQN(e.Name)
+	e.NvmeTcpTarget.Nguid = getVolumeScopedNGUID(e.VolumeName, e.Name)
+	e.NvmeTcpTarget.Nqn = getVolumeScopedNQN(e.VolumeName, e.Name)
 
 	e.log.Info("Blindly stopping expose RAID bdev for engine")
 	if err := spdkClient.StopExposeBdev(e.NvmeTcpTarget.Nqn); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {

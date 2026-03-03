@@ -8,6 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/longhorn/go-spdk-helper/pkg/jsonrpc"
 	spdktypes "github.com/longhorn/go-spdk-helper/pkg/spdk/types"
 )
 
@@ -1154,11 +1155,23 @@ func (c *Client) NvmfCreateSubsystem(nqn string) (created bool, err error) {
 	req := spdktypes.NvmfCreateSubsystemRequest{
 		Nqn:          nqn,
 		AllowAnyHost: true,
+		AnaReporting: true,
 	}
 
 	cmdOutput, err := c.jsonCli.SendCommand("nvmf_create_subsystem", req)
 	if err != nil {
-		return false, err
+		if !jsonrpc.IsJSONRPCRespErrorInvalidParams(err) {
+			return false, err
+		}
+
+		fallbackReq := spdktypes.NvmfCreateSubsystemRequest{
+			Nqn:          nqn,
+			AllowAnyHost: true,
+		}
+		cmdOutput, err = c.jsonCli.SendCommand("nvmf_create_subsystem", fallbackReq)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	return created, json.Unmarshal(cmdOutput, &created)
@@ -1215,12 +1228,27 @@ func (c *Client) NvmfSubsystemAddNs(nqn, bdevName, nguid string) (nsid uint32, e
 		Namespace: spdktypes.NvmfSubsystemNamespace{
 			BdevName: bdevName,
 			Nguid:    nguid,
+			Anagrpid: 1,
 		},
 	}
 
 	cmdOutput, err := c.jsonCli.SendCommand("nvmf_subsystem_add_ns", req)
 	if err != nil {
-		return 0, err
+		if !jsonrpc.IsJSONRPCRespErrorInvalidParams(err) {
+			return 0, err
+		}
+
+		fallbackReq := spdktypes.NvmfSubsystemAddNsRequest{
+			Nqn: nqn,
+			Namespace: spdktypes.NvmfSubsystemNamespace{
+				BdevName: bdevName,
+				Nguid:    nguid,
+			},
+		}
+		cmdOutput, err = c.jsonCli.SendCommand("nvmf_subsystem_add_ns", fallbackReq)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	return nsid, json.Unmarshal(cmdOutput, &nsid)
@@ -1364,6 +1392,31 @@ func (c *Client) NvmfSubsystemGetListeners(nqn, tgtName string) (listenerList []
 	}
 
 	return listenerList, json.Unmarshal(cmdOutput, &listenerList)
+}
+
+// NvmfSubsystemListenerSetAnaState sets ANA state for a listener in an NVMe-oF subsystem.
+func (c *Client) NvmfSubsystemListenerSetAnaState(nqn, traddr, trsvcid string,
+	trtype spdktypes.NvmeTransportType, adrfam spdktypes.NvmeAddressFamily,
+	anaState spdktypes.NvmfSubsystemListenerAnaState, anaGroupID uint32, tgtName string) (updated bool, err error) {
+	req := spdktypes.NvmfSubsystemListenerSetAnaStateRequest{
+		Nqn: nqn,
+		ListenAddress: spdktypes.NvmfSubsystemListenAddress{
+			Traddr:  traddr,
+			Trsvcid: trsvcid,
+			Trtype:  trtype,
+			Adrfam:  adrfam,
+		},
+		AnaState:   anaState,
+		AnaGroupID: anaGroupID,
+		TgtName:    tgtName,
+	}
+
+	cmdOutput, err := c.jsonCli.SendCommand("nvmf_subsystem_listener_set_ana_state", req)
+	if err != nil {
+		return false, err
+	}
+
+	return updated, json.Unmarshal(cmdOutput, &updated)
 }
 
 // LogSetFlag sets the log flag.

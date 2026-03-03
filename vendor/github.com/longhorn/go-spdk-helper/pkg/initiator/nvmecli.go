@@ -302,9 +302,8 @@ func discovery(hostID, hostNQN, ip, port string, executor *commonns.Executor) ([
 }
 
 func connect(hostID, hostNQN, nqn, transpotType, ip, port string, executor *commonns.Executor) (string, error) {
-	var err error
-
-	opts := []string{
+	buildConnectOpts := func(includeHostParams bool) []string {
+		opts := []string{
 		"connect",
 		"-t", transpotType,
 		"--nqn", nqn,
@@ -314,24 +313,34 @@ func connect(hostID, hostNQN, nqn, transpotType, ip, port string, executor *comm
 		"-o", "json",
 	}
 
-	if hostID != "" {
-		opts = append(opts, "-I", hostID)
-	}
-	if hostNQN != "" {
-		opts = append(opts, "-q", hostNQN)
-	}
-	if ip != "" {
-		opts = append(opts, "-a", ip)
-	}
-	if port != "" {
-		opts = append(opts, "-s", port)
+		if includeHostParams {
+			if hostID != "" {
+				opts = append(opts, "-I", hostID)
+			}
+			if hostNQN != "" {
+				opts = append(opts, "-q", hostNQN)
+			}
+		}
+		if ip != "" {
+			opts = append(opts, "-a", ip)
+		}
+		if port != "" {
+			opts = append(opts, "-s", port)
+		}
+		return opts
 	}
 
 	// The output example:
 	// {
 	//  "device" : "nvme0"
 	// }
+	opts := buildConnectOpts(true)
 	outputStr, err := executor.Execute(nil, nvmeBinary, opts, types.ExecuteTimeout)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "invalid arguments/configuration") && (hostID != "" || hostNQN != "") {
+		// Some environments reject host-id/hostnqn parameters for a subsequent path connect.
+		fallbackOpts := buildConnectOpts(false)
+		outputStr, err = executor.Execute(nil, nvmeBinary, fallbackOpts, types.ExecuteTimeout)
+	}
 	if err != nil {
 		return "", err
 	}

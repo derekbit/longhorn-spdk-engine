@@ -1429,6 +1429,76 @@ func (s *Server) EngineFrontendSwitchOver(ctx context.Context, req *spdkrpc.Engi
 	return &emptypb.Empty{}, nil
 }
 
+func (s *Server) NvmfSubsystemListenerSetAnaState(ctx context.Context, req *spdkrpc.NvmfSubsystemListenerSetAnaStateRequest) (ret *emptypb.Empty, err error) {
+	if req == nil {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "request is required")
+	}
+	if req.Nqn == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "nqn is required")
+	}
+	if req.Traddr == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "traddr is required")
+	}
+	if req.Trsvcid == 0 {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "trsvcid is required")
+	}
+
+	anaState := strings.ToLower(strings.TrimSpace(req.AnaState))
+	switch anaState {
+	case string(spdktypes.NvmfSubsystemListenerAnaStateOptimized),
+		string(spdktypes.NvmfSubsystemListenerAnaStateNonOptimized),
+		string(spdktypes.NvmfSubsystemListenerAnaStateInaccessible):
+	default:
+		return nil, grpcstatus.Errorf(grpccodes.InvalidArgument, "unsupported ana_state %q", req.AnaState)
+	}
+
+	updated, err := s.spdkClient.NvmfSubsystemListenerSetAnaState(
+		req.Nqn,
+		req.Traddr,
+		strconv.Itoa(int(req.Trsvcid)),
+		spdktypes.NvmeTransportTypeTCP,
+		spdktypes.NvmeAddressFamilyIPv4,
+		spdktypes.NvmfSubsystemListenerAnaState(anaState),
+		1,
+		"",
+	)
+	if err != nil {
+		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to set ANA state %s for %s at %s:%d", anaState, req.Nqn, req.Traddr, req.Trsvcid).Error())
+	}
+	if !updated {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "setting ANA state returned false for %s at %s:%d", req.Nqn, req.Traddr, req.Trsvcid)
+	}
+
+	listeners, err := s.spdkClient.NvmfSubsystemGetListeners(req.Nqn, "")
+	if err != nil {
+		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to verify ANA state for %s at %s:%d", req.Nqn, req.Traddr, req.Trsvcid).Error())
+	}
+
+	matched := false
+	for _, listener := range listeners {
+		if listener.Address.Traddr != req.Traddr {
+			continue
+		}
+		if listener.Address.Trsvcid != strconv.Itoa(int(req.Trsvcid)) {
+			continue
+		}
+		matched = true
+		if strings.EqualFold(string(listener.AnaState), anaState) {
+			return &emptypb.Empty{}, nil
+		}
+		return nil, grpcstatus.Errorf(grpccodes.Internal,
+			"ANA state mismatch for %s at %s:%d: expected=%s actual=%s",
+			req.Nqn, req.Traddr, req.Trsvcid, anaState, listener.AnaState)
+	}
+
+	if !matched {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound,
+			"listener not found for %s at %s:%d while verifying ANA state", req.Nqn, req.Traddr, req.Trsvcid)
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
 func toSwitchOverGRPCError(err error, format string, args ...interface{}) error {
 	code := grpccodes.Internal
 
