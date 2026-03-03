@@ -23,7 +23,6 @@ import (
 	"github.com/longhorn/go-spdk-helper/pkg/initiator"
 	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
-	commonbitmap "github.com/longhorn/go-common-libs/bitmap"
 	spdkclient "github.com/longhorn/go-spdk-helper/pkg/spdk/client"
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
 )
@@ -75,9 +74,6 @@ type EngineFrontend struct {
 }
 
 type NvmeTcpFrontend struct {
-	IP   string
-	Port int32
-
 	TargetIP   string
 	TargetPort int32
 
@@ -417,7 +413,9 @@ func (ef *EngineFrontend) createNvmeTcpFrontend(spdkClient *spdkclient.Client, t
 	//    a "reconnecting" state. Once SPDK re-exposes the resized RAID, the kernel
 	//    automatically recovers the original path (nvme1n1) and perceives the new size,
 	//    allowing a successful 'dmsetup reload' without breaking the mount point.
+	ef.RLock()
 	disconnectTarget := !ef.isExpanding
+	ef.RUnlock()
 
 	dmDeviceIsBusy, err = i.StartNvmeTCPInitiator(targetIP, strconv.Itoa(int(targetPort)), true, disconnectTarget)
 	if err != nil {
@@ -558,10 +556,6 @@ func (ef *EngineFrontend) createUblkFrontend(spdkClient *spdkclient.Client) (err
 	return nil
 }
 
-func (ef *EngineFrontend) isNewNvmeTcpFrontendEngine() bool {
-	return ef.NvmeTcpFrontend != nil && ef.NvmeTcpFrontend.TargetIP == ""
-}
-
 func (ef *EngineFrontend) isInitiatorCreationRequired(targetIP string) (bool, error) {
 	if types.IsUblkFrontend(ef.Frontend) {
 		return true, nil
@@ -577,7 +571,7 @@ func (ef *EngineFrontend) isInitiatorCreationRequired(targetIP string) (bool, er
 // Expand performs an online volume expansion for the Longhorn Engine using SPDK.
 // It expands the underlying replica logical volumes (lvol), recreates the SPDK RAID bdev,
 // suspends and resumes frontend I/O as needed, and ensures cleanup and status updates on failure.
-func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Client, size uint64, superiorPortAllocator *commonbitmap.Bitmap) (retErr error) {
+func (ef *EngineFrontend) Expand(ctx context.Context, spdkClient *spdkclient.Client, size uint64) (retErr error) {
 	ef.log.Info("Expanding engine frontend")
 
 	// Phase 1: Acquire lock to read state and check expansion guards.
@@ -743,11 +737,7 @@ func (ef *EngineFrontend) finishExpansion(fromSize uint64, expanded bool, size u
 	ef.State = types.InstanceStateRunning
 	ef.ErrorMsg = ""
 	if expanded {
-		if ef.lastExpansionError != "" {
-			ef.log.Infof("Succeeded to expand from size %v to %v but there are some replica expansion failures: %v", fromSize, size, ef.lastExpansionError)
-		} else {
-			ef.log.Infof("Succeeded to expand from size %v to %v", fromSize, size)
-		}
+		ef.log.Infof("Succeeded to expand from size %v to %v", fromSize, size)
 		ef.SpecSize = size
 	} else {
 		ef.log.Infof("Failed to expand from size %v to %v", fromSize, size)
@@ -773,7 +763,7 @@ func (ef *EngineFrontend) prepareExpansion(spdkClient *spdkclient.Client) (engin
 }
 
 // SuspendFrontend suspends the engine frontend. IO operations will be suspended.
-func (ef *EngineFrontend) Suspend(spdkClient *spdkclient.Client) (err error) {
+func (ef *EngineFrontend) Suspend(_ *spdkclient.Client) (err error) {
 	ef.Lock()
 	defer func() {
 		ef.Unlock()
@@ -822,7 +812,7 @@ func (ef *EngineFrontend) Suspend(spdkClient *spdkclient.Client) (err error) {
 }
 
 // ResumeFrontend resumes the engine frontend. IO operations will be resumed.
-func (ef *EngineFrontend) Resume(spdkClient *spdkclient.Client) (err error) {
+func (ef *EngineFrontend) Resume(_ *spdkclient.Client) (err error) {
 	ef.Lock()
 	defer func() {
 		ef.Unlock()
@@ -1287,7 +1277,7 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 	}
 	if ef.isReplicaAdding {
 		ef.Unlock()
-		return errors.Wrapf(ErrSwitchOverTargetPrecondition, "engine frontend %s replica add is in progress", ef.Name)
+		return fmt.Errorf("engine frontend %s replica add is already in progress", ef.Name)
 	}
 	if ef.State != types.InstanceStateRunning {
 		ef.Unlock()
@@ -1359,9 +1349,9 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 		//   NVMe controller and stops the source from exposing.
 		// This prevents bdev_nvme_detach_controller hangs on same-node NVMe-oF during
 		// subsequent ReplicaDelete.
-		if finishErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress); finishErr != nil {
-			ef.log.WithError(finishErr).Warnf("Engine frontend %s failed to clean up replica %s add after shallow copy failure", engineName, dstReplicaName)
-			err = multierr.Append(err, finishErr)
+		if cleanupErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress); cleanupErr != nil {
+			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after shallow copy failure", engineName, dstReplicaName)
+			err = multierr.Append(err, cleanupErr)
 		}
 		ef.setReplicaAddError(errors.Wrapf(err, "failed to shallow copy replica %s on engine %s", dstReplicaName, engineName))
 		return
@@ -1372,9 +1362,9 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 	if err != nil {
 		// Shallow copy succeeded but suspend failed — still need to clean up SPDK resources
 		// (external snapshot NVMe controller, src replica exposing).
-		if finishErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress); finishErr != nil {
-			ef.log.WithError(finishErr).Warnf("Engine frontend %s failed to clean up replica %s add after suspend failure", engineName, dstReplicaName)
-			err = multierr.Append(err, finishErr)
+		if cleanupErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress); cleanupErr != nil {
+			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after suspend failure", engineName, dstReplicaName)
+			err = multierr.Append(err, cleanupErr)
 		}
 		ef.setReplicaAddError(errors.Wrapf(err, "failed to suspend engine frontend %s before replica add finish", engineName))
 		return
@@ -1486,6 +1476,11 @@ func (ef *EngineFrontend) ValidateAndUpdate(spdkClient *spdkclient.Client) (err 
 		return nil
 	}
 
+	if ef.isReplicaAdding {
+		ef.log.Debug("Engine frontend is adding replica, will skip the validation and update")
+		return nil
+	}
+
 	return ef.validateAndUpdateFrontend(spdkClient)
 }
 
@@ -1511,7 +1506,9 @@ func (ef *EngineFrontend) validateAndUpdateFrontend(client *spdkclient.Client) (
 
 func (ef *EngineFrontend) validateAndUpdateUblkFrontend(client *spdkclient.Client) (err error) {
 	defer func() {
-		err = errors.Wrapf(err, "failed to validateAndUpdateUblkFrontend for engine frontend %v", ef.Name)
+		if err != nil {
+			err = errors.Wrapf(err, "failed to validateAndUpdateUblkFrontend for engine frontend %v", ef.Name)
+		}
 	}()
 	if ef.UblkFrontend == nil {
 		return fmt.Errorf("UblkFrontend is nil")
@@ -1574,7 +1571,7 @@ func (ef *EngineFrontend) validateAndUpdateNvmeTcpFrontend() (err error) {
 		if ef.Endpoint == "" {
 			ef.Endpoint = nvmfEndpoint
 		}
-		if ef.Endpoint != "" && ef.Endpoint != nvmfEndpoint {
+		if ef.Endpoint != nvmfEndpoint {
 			return fmt.Errorf("found mismatching between engine frontend endpoint %s and actual nvmf endpoint %s for engine frontend %s", ef.Endpoint, nvmfEndpoint, ef.Name)
 		}
 	default:
