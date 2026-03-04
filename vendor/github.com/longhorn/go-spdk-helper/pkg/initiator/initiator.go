@@ -216,7 +216,7 @@ func (i *Initiator) WaitForNVMeTCPConnect(maxRetries int, retryInterval time.Dur
 		retry.DelayType(retry.FixedDelay),
 		retry.LastErrorOnly(true),
 		retry.OnRetry(func(n uint, err error) {
-			logrus.WithError(err).Warnf(
+			i.logger.WithError(err).Warnf(
 				"Retrying waiting for NVMe/TCP connect: address=%s:%s attempt=%d/%d next_wait=%s",
 				i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, n+1, maxRetries, retryInterval,
 			)
@@ -530,6 +530,20 @@ func (i *Initiator) StartUblkInitiator(spdkClient *client.Client, dmDeviceAndEnd
 		return false, err
 	}
 
+	queueDepth := i.UblkInfo.UblkQueueDepth
+	if queueDepth <= 0 {
+		i.logger.Infof("Invalid queue depth %d for ublk initiator, using default value %d", queueDepth, DefaultUblkQueueDepth)
+		queueDepth = DefaultUblkQueueDepth
+	}
+	numQueues := i.UblkInfo.UblkNumberOfQueue
+	if numQueues <= 0 {
+		i.logger.Infof("Invalid number of queues %d for ublk initiator, using default value %d", numQueues, DefaultUblkNumberOfQueue)
+		numQueues = DefaultUblkNumberOfQueue
+	}
+
+	i.UblkInfo.UblkQueueDepth = queueDepth
+	i.UblkInfo.UblkNumberOfQueue = numQueues
+
 	i.logger.Infof("Starting ublk initiator with bdev %s, available UBLK ID %d, queue depth %d, number of queues %d",
 		i.UblkInfo.BdevName, availableUblkID, i.UblkInfo.UblkQueueDepth, i.UblkInfo.UblkNumberOfQueue)
 	if err := spdkClient.UblkStartDisk(i.UblkInfo.BdevName, availableUblkID, i.UblkInfo.UblkQueueDepth, i.UblkInfo.UblkNumberOfQueue); err != nil {
@@ -611,7 +625,7 @@ func (i *Initiator) waitAndLoadNVMeDeviceInfoWithoutLock(transportAddress, trans
 		retry.DelayType(retry.FixedDelay),
 		retry.LastErrorOnly(true),
 		retry.OnRetry(func(n uint, err error) {
-			logrus.WithError(err).Warnf(
+			i.logger.WithError(err).Warnf(
 				"Retrying loading NVMe device info for initiator %s: address=%s:%s attempt=%d/%d next_wait=%s",
 				i.Name, transportAddress, transportServiceID, n+1, maxWaitDeviceRetries, waitDeviceInterval,
 			)
@@ -940,7 +954,7 @@ func (i *Initiator) createLinearDmDevice() error {
 	}
 
 	dmDevPath := getDmDevicePath(i.Name)
-	if err := validateDiskCreation(dmDevPath, validateDiskCreationMaxRetries, validateDiskCreationRetryInterval); err != nil {
+	if err := i.validateDiskCreation(dmDevPath, validateDiskCreationMaxRetries, validateDiskCreationRetryInterval); err != nil {
 		return err
 	}
 
@@ -957,7 +971,7 @@ func (i *Initiator) createLinearDmDevice() error {
 	return nil
 }
 
-func validateDiskCreation(path string, maxRetries int, retryInterval time.Duration) error {
+func (i *Initiator) validateDiskCreation(path string, maxRetries int, retryInterval time.Duration) error {
 	if maxRetries <= 0 {
 		return fmt.Errorf("maxRetries must be > 0")
 	}
@@ -978,7 +992,7 @@ func validateDiskCreation(path string, maxRetries int, retryInterval time.Durati
 		retry.DelayType(retry.FixedDelay),
 		retry.LastErrorOnly(true),
 		retry.OnRetry(func(n uint, err error) {
-			logrus.WithError(err).Warnf(
+			i.logger.WithError(err).Warnf(
 				"Retrying device creation validation: path=%s attempt=%d/%d next_wait=%s",
 				path, n+1, maxRetries, retryInterval,
 			)
@@ -989,7 +1003,7 @@ func validateDiskCreation(path string, maxRetries int, retryInterval time.Durati
 		return fmt.Errorf("failed to validate device %s creation: %w", path, err)
 	}
 
-	logrus.Infof("Device %s is created and ready", path)
+	i.logger.Infof("Device %s is created and ready", path)
 	return nil
 }
 

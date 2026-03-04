@@ -592,7 +592,7 @@ func (c *SPDKClient) ReplicaRebuildingDstFinish(replicaName string) error {
 	return errors.Wrapf(err, "failed to finish replica rebuilding dst %s", replicaName)
 }
 
-func (c *SPDKClient) ReplicaRebuildingDstShallowCopyStart(dstReplicaName, snapshotName string) error {
+func (c *SPDKClient) ReplicaRebuildingDstShallowCopyStart(dstReplicaName, snapshotName string, fastSync bool) error {
 	if dstReplicaName == "" {
 		return fmt.Errorf("failed to start rebuilding dst replica shallow copy: missing required parameter dst replica name")
 	}
@@ -607,6 +607,7 @@ func (c *SPDKClient) ReplicaRebuildingDstShallowCopyStart(dstReplicaName, snapsh
 	_, err := client.ReplicaRebuildingDstShallowCopyStart(ctx, &spdkrpc.ReplicaRebuildingDstShallowCopyStartRequest{
 		Name:         dstReplicaName,
 		SnapshotName: snapshotName,
+		FastSync:     fastSync,
 	})
 	return errors.Wrapf(err, "failed to start rebuilding dst replica %v shallow copy snapshot %v", dstReplicaName, snapshotName)
 }
@@ -1050,7 +1051,7 @@ func (c *SPDKClient) EngineSnapshotClone(name, snapshotName, srcEngineName, srcE
 		name, snapshotName, srcEngineName, srcEngineAddress)
 }
 
-func (c *SPDKClient) EngineReplicaAdd(engineName, replicaName, replicaAddress string) error {
+func (c *SPDKClient) EngineReplicaAdd(engineName, replicaName, replicaAddress string, fastSync bool) error {
 	if engineName == "" {
 		return fmt.Errorf("failed to add replica for engine: missing required parameter engineName")
 	}
@@ -1066,29 +1067,30 @@ func (c *SPDKClient) EngineReplicaAdd(engineName, replicaName, replicaAddress st
 		EngineName:     engineName,
 		ReplicaName:    replicaName,
 		ReplicaAddress: replicaAddress,
+		FastSync:       fastSync,
 	})
 	return errors.Wrapf(err, "failed to add replica %s with address %s to engine %s", replicaName, replicaAddress, engineName)
 }
 
 // EngineReplicaAddStart is a scaffold for the future dedicated RPC.
 // TODO: switch to spdkrpc.EngineReplicaAddStart once proto is extended.
-func (c *SPDKClient) EngineReplicaAddStart(engineName, replicaName, replicaAddress string) error {
-	return c.engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, replicaAddPhaseStart, GRPCServiceTimeout)
+func (c *SPDKClient) EngineReplicaAddStart(engineName, replicaName, replicaAddress string, fastSync bool) error {
+	return c.engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, replicaAddPhaseStart, fastSync, GRPCServiceTimeout)
 }
 
 // EngineReplicaAddFinish is a scaffold for the future dedicated RPC.
 // TODO: switch to spdkrpc.EngineReplicaAddFinish once proto is extended.
-func (c *SPDKClient) EngineReplicaAddFinish(engineName, replicaName, replicaAddress string) error {
-	return c.engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, replicaAddPhaseFinish, GRPCServiceTimeout)
+func (c *SPDKClient) EngineReplicaAddFinish(engineName, replicaName, replicaAddress string, fastSync bool) error {
+	return c.engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, replicaAddPhaseFinish, fastSync, GRPCServiceTimeout)
 }
 
 // EngineReplicaAddShallowCopy is a scaffold for the future dedicated RPC.
 // TODO: switch to spdkrpc.EngineReplicaAddShallowCopy once proto is extended.
-func (c *SPDKClient) EngineReplicaAddShallowCopy(engineName, replicaName, replicaAddress string) error {
-	return c.engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, replicaAddPhaseShallowCopy, GRPCServiceLongTimeout)
+func (c *SPDKClient) EngineReplicaAddShallowCopy(engineName, replicaName, replicaAddress string, fastSync bool) error {
+	return c.engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, replicaAddPhaseShallowCopy, fastSync, GRPCServiceLongTimeout)
 }
 
-func (c *SPDKClient) engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, phase string, timeout time.Duration) error {
+func (c *SPDKClient) engineReplicaAddWithPhase(engineName, replicaName, replicaAddress, phase string, fastSync bool, timeout time.Duration) error {
 	if engineName == "" {
 		return fmt.Errorf("failed to add replica for engine: missing required parameter engineName")
 	}
@@ -1100,6 +1102,7 @@ func (c *SPDKClient) engineReplicaAddWithPhase(engineName, replicaName, replicaA
 		EngineName:     engineName,
 		ReplicaName:    replicaName,
 		ReplicaAddress: replicaAddress,
+		FastSync:       fastSync,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -1111,7 +1114,7 @@ func (c *SPDKClient) engineReplicaAddWithPhase(engineName, replicaName, replicaA
 	return errors.Wrapf(err, "failed to add replica %s with address %s to engine %s in %s phase", replicaName, replicaAddress, engineName, phase)
 }
 
-func (c *SPDKClient) EngineFrontendReplicaAdd(engineFrontendName, replicaName, replicaAddress string) error {
+func (c *SPDKClient) EngineFrontendReplicaAdd(engineFrontendName, replicaName, replicaAddress string, fastSync bool) error {
 	if engineFrontendName == "" {
 		return fmt.Errorf("failed to add replica for engine frontend: missing required parameter engineFrontendName")
 	}
@@ -1127,6 +1130,7 @@ func (c *SPDKClient) EngineFrontendReplicaAdd(engineFrontendName, replicaName, r
 		EngineFrontendName: engineFrontendName,
 		ReplicaName:        replicaName,
 		ReplicaAddress:     replicaAddress,
+		FastSync:           fastSync,
 	})
 	return errors.Wrapf(err, "failed to add replica %s with address %s by engine frontend %s", replicaName, replicaAddress, engineFrontendName)
 }

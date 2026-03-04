@@ -3407,7 +3407,7 @@ func (r *Replica) doCleanupForRebuildingDst(spdkClient *spdkclient.Client) error
 }
 
 // rebuildingDstShallowCopyPrepare creates a new rebuilding lvol or renames an existing expired lvol as the rebuilding lvol for the dst replica.
-func (r *Replica) rebuildingDstShallowCopyPrepare(spdkClient *spdkclient.Client, srcReplicaServiceCli *client.SPDKClient, snapshotName string) (dstRebuildingLvolAddress string, requireRangeCopy bool, err error) {
+func (r *Replica) rebuildingDstShallowCopyPrepare(spdkClient *spdkclient.Client, srcReplicaServiceCli *client.SPDKClient, snapshotName string, fastSync bool) (dstRebuildingLvolAddress string, requireRangeCopy bool, err error) {
 	r.log.Infof("Rebuilding dst replica %s starts to prepare the rebuilding lvol for snapshot %s shallow copy", r.Name, snapshotName)
 
 	rebuildingLvolName := GetReplicaRebuildingLvolName(r.Name)
@@ -3457,7 +3457,8 @@ func (r *Replica) rebuildingDstShallowCopyPrepare(spdkClient *spdkclient.Client,
 		isIntactSnap := srcSnapSvcLvol.SnapshotTimestamp == dstSnapSvcLvol.SnapshotTimestamp &&
 			srcSnapSvcLvol.ActualSize == dstSnapSvcLvol.ActualSize &&
 			srcSnapSvcLvol.SnapshotChecksum != "" && dstSnapSvcLvol.SnapshotChecksum != "" && srcSnapSvcLvol.SnapshotChecksum == dstSnapSvcLvol.SnapshotChecksum
-		if isIntactSnap {
+		logrus.Infof("Debug ============> fastSync=%v", fastSync)
+		if isIntactSnap && fastSync {
 			if _, err = spdkClient.BdevLvolClone(dstSnapSvcLvol.Alias, rebuildingLvolName); err != nil {
 				return "", false, errors.Wrapf(err, "failed to clone rebuilding lvol %s behinds the existing intact snapshot lvol %s for dst replica %v rebuilding snapshot %s shallow copy prepare", rebuildingLvolName, dstSnapSvcLvol.Alias, r.Name, snapshotName)
 			}
@@ -3634,7 +3635,7 @@ func (r *Replica) rebuildingDstRangeShallowCopy(spdkClient *spdkclient.Client, s
 
 // RebuildingDstShallowCopyStart let the dst replica ask the src replica to start a shallow copy from a snapshot to the rebuilding lvol.
 // Each time before starting a shallow copy, the dst replica will prepare a new rebuilding lvol and expose it as a NVMf bdev.
-func (r *Replica) RebuildingDstShallowCopyStart(spdkClient *spdkclient.Client, snapshotName string) (err error) {
+func (r *Replica) RebuildingDstShallowCopyStart(spdkClient *spdkclient.Client, snapshotName string, fastSync bool) (err error) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -3656,7 +3657,7 @@ func (r *Replica) RebuildingDstShallowCopyStart(spdkClient *spdkclient.Client, s
 		}
 	}()
 
-	dstRebuildingLvolAddress, requireRangeCopy, err := r.rebuildingDstShallowCopyPrepare(spdkClient, srcReplicaServiceCli, snapshotName)
+	dstRebuildingLvolAddress, requireRangeCopy, err := r.rebuildingDstShallowCopyPrepare(spdkClient, srcReplicaServiceCli, snapshotName, fastSync)
 	if err != nil {
 		return err
 	}

@@ -1201,7 +1201,7 @@ func (s *Server) ReplicaRebuildingDstShallowCopyStart(ctx context.Context, req *
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find replica %s during rebuilding dst snapshot %s shallow copy start", req.Name, req.SnapshotName)
 	}
 
-	if err = r.RebuildingDstShallowCopyStart(spdkClient, req.SnapshotName); err != nil {
+	if err = r.RebuildingDstShallowCopyStart(spdkClient, req.SnapshotName, req.FastSync); err != nil {
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
@@ -1631,7 +1631,7 @@ func (s *Server) EngineReplicaAddStart(ctx context.Context, req *spdkrpc.EngineR
 	if e == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s add start", req.EngineName, req.ReplicaName, req.ReplicaAddress)
 	}
-	return &emptypb.Empty{}, e.ReplicaAddStart(spdkClient, req.ReplicaName, req.ReplicaAddress)
+	return &emptypb.Empty{}, e.ReplicaAddStart(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync)
 }
 
 func (s *Server) EngineReplicaAddShallowCopy(ctx context.Context, req *spdkrpc.EngineReplicaAddRequest) (ret *emptypb.Empty, err error) {
@@ -1686,7 +1686,7 @@ func (s *Server) EngineFrontendReplicaAdd(ctx context.Context, req *spdkrpc.Engi
 	})
 	log.Info("Starting frontend-aware replica add")
 
-	return &emptypb.Empty{}, ef.ReplicaAdd(spdkClient, req.ReplicaName, req.ReplicaAddress)
+	return &emptypb.Empty{}, ef.ReplicaAdd(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync)
 }
 
 func (s *Server) EngineReplicaList(ctx context.Context, req *spdkrpc.EngineReplicaListRequest) (ret *spdkrpc.EngineReplicaListResponse, err error) {

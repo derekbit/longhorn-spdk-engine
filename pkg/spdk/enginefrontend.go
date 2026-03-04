@@ -1269,7 +1269,7 @@ func (ef *EngineFrontend) resume() error {
 	return ef.initiator.Resume()
 }
 
-func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaName, dstReplicaAddress string) (err error) {
+func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaName, dstReplicaAddress string, fastSync bool) (err error) {
 	ef.Lock()
 	if ef.isSwitchingOver {
 		ef.Unlock()
@@ -1308,7 +1308,7 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 
 	// NOTE: Engine and EngineFrontend may run on different nodes.
 	// Replica-add execution must happen on the Engine node.
-	if err := engineSpdkClient.EngineReplicaAddStart(engineName, dstReplicaName, dstReplicaAddress); err != nil {
+	if err := engineSpdkClient.EngineReplicaAddStart(engineName, dstReplicaName, dstReplicaAddress, fastSync); err != nil {
 		ef.Lock()
 		ef.isReplicaAdding = false
 		ef.Unlock()
@@ -1317,11 +1317,11 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 		return wrappedErr
 	}
 
-	go ef.completeReplicaAdd(engineName, engineIP, dstReplicaName, dstReplicaAddress)
+	go ef.completeReplicaAdd(engineName, engineIP, dstReplicaName, dstReplicaAddress, fastSync)
 	return nil
 }
 
-func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaName, dstReplicaAddress string) {
+func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaName, dstReplicaAddress string, fastSync bool) {
 	defer func() {
 		ef.Lock()
 		ef.isReplicaAdding = false
@@ -1342,14 +1342,14 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 	var finishErr error
 
 	// 1. Shallow copy
-	if err := engineSpdkClient.EngineReplicaAddShallowCopy(engineName, dstReplicaName, dstReplicaAddress); err != nil {
+	if err := engineSpdkClient.EngineReplicaAddShallowCopy(engineName, dstReplicaName, dstReplicaAddress, fastSync); err != nil {
 		// Call EngineReplicaAddFinish to trigger proper SPDK resource cleanup:
 		// - replicaAddFinalize detects shallowCopyFailed flag and skips re-attempt,
 		//   then calls the real replicaAddFinish which detaches the external snapshot
 		//   NVMe controller and stops the source from exposing.
 		// This prevents bdev_nvme_detach_controller hangs on same-node NVMe-oF during
 		// subsequent ReplicaDelete.
-		if cleanupErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress); cleanupErr != nil {
+		if cleanupErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress, fastSync); cleanupErr != nil {
 			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after shallow copy failure", engineName, dstReplicaName)
 			err = multierr.Append(err, cleanupErr)
 		}
@@ -1362,7 +1362,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 	if err != nil {
 		// Shallow copy succeeded but suspend failed — still need to clean up SPDK resources
 		// (external snapshot NVMe controller, src replica exposing).
-		if cleanupErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress); cleanupErr != nil {
+		if cleanupErr := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress, fastSync); cleanupErr != nil {
 			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after suspend failure", engineName, dstReplicaName)
 			err = multierr.Append(err, cleanupErr)
 		}
@@ -1383,7 +1383,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 	}
 
 	// 3. Finish
-	if err := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress); err != nil {
+	if err := engineSpdkClient.EngineReplicaAddFinish(engineName, dstReplicaName, dstReplicaAddress, fastSync); err != nil {
 		finishErr = errors.Wrapf(err, "failed to finish replica add %s on engine %s", dstReplicaName, engineName)
 		return
 	}
