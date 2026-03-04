@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/sirupsen/logrus"
 
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	grpccodes "google.golang.org/grpc/codes"
@@ -33,7 +35,11 @@ import (
 )
 
 const (
-	MonitorInterval = 3 * time.Second
+	MonitorInterval            = 3 * time.Second
+	replicaAddPhaseMetadata    = "x-longhorn-replica-add-phase"
+	replicaAddPhaseStart       = "start"
+	replicaAddPhaseShallowCopy = "shallow-copy"
+	replicaAddPhaseFinish      = "finish"
 )
 
 type Server struct {
@@ -48,9 +54,10 @@ type Server struct {
 	spdkClient    *spdkclient.Client
 	portAllocator *commonbitmap.Bitmap
 
-	diskMap    map[string]*Disk
-	replicaMap map[string]*Replica
-	engineMap  map[string]*Engine
+	diskMap           map[string]*Disk
+	replicaMap        map[string]*Replica
+	engineMap         map[string]*Engine
+	engineFrontendMap map[string]*EngineFrontend
 
 	backupMap map[string]*Backup
 
@@ -88,7 +95,7 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 	broadcasters := map[types.InstanceType]*broadcaster.Broadcaster{}
 	broadcastChs := map[types.InstanceType]chan interface{}{}
 	updateChs := map[types.InstanceType]chan interface{}{}
-	for _, t := range []types.InstanceType{types.InstanceTypeReplica, types.InstanceTypeEngine, types.InstanceTypeBackingImage} {
+	for _, t := range []types.InstanceType{types.InstanceTypeReplica, types.InstanceTypeEngine, types.InstanceTypeEngineFrontend, types.InstanceTypeBackingImage} {
 		broadcasters[t] = &broadcaster.Broadcaster{}
 		broadcastChs[t] = make(chan interface{})
 		updateChs[t] = make(chan interface{})
@@ -104,8 +111,9 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 
 		diskMap: map[string]*Disk{},
 
-		replicaMap: map[string]*Replica{},
-		engineMap:  map[string]*Engine{},
+		replicaMap:        map[string]*Replica{},
+		engineMap:         map[string]*Engine{},
+		engineFrontendMap: map[string]*EngineFrontend{},
 
 		backupMap: map[string]*Backup{},
 
@@ -121,6 +129,9 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 		return nil, err
 	}
 	if _, err := s.broadcasters[types.InstanceTypeEngine].Subscribe(ctx, s.engineBroadcastConnector); err != nil {
+		return nil, err
+	}
+	if _, err := s.broadcasters[types.InstanceTypeEngineFrontend].Subscribe(ctx, s.engineFrontendBroadcastConnector); err != nil {
 		return nil, err
 	}
 	if _, err := s.broadcasters[types.InstanceTypeBackingImage].Subscribe(ctx, s.backingImageBroadcastConnector); err != nil {
@@ -180,7 +191,9 @@ func (s *Server) tryEnsureSPDKTgtConnectionHealthy() error {
 
 func (s *Server) clientReconnect() error {
 	s.Lock()
-	defer s.Unlock()
+	defer func() {
+		s.Unlock()
+	}()
 
 	oldClient := s.spdkClient
 
@@ -198,67 +211,115 @@ func (s *Server) clientReconnect() error {
 	return nil
 }
 
+type verifyState struct {
+	replicaMap            map[string]*Replica
+	replicaMapForSync     map[string]*Replica
+	engineMapForSync      map[string]*Engine
+	engineFrontendForSync map[string]*EngineFrontend
+	backingImageMap       map[string]*BackingImage
+	backingImageForSync   map[string]*BackingImage
+	spdkClient            *spdkclient.Client
+}
+
 func (s *Server) verify() (err error) {
-	replicaMap := map[string]*Replica{}
-	replicaMapForSync := map[string]*Replica{}
-	engineMapForSync := map[string]*Engine{}
-	backingImageMap := map[string]*BackingImage{}
-	backingImageMapForSync := map[string]*BackingImage{}
-
 	s.Lock()
-	for k, v := range s.replicaMap {
-		replicaMap[k] = v
-		replicaMapForSync[k] = v
-	}
-	for k, v := range s.engineMap {
-		engineMapForSync[k] = v
-	}
-	for k, v := range s.backingImageMap {
-		backingImageMap[k] = v
-		backingImageMapForSync[k] = v
-	}
-
-	spdkClient := s.spdkClient
-
+	locked := true
 	defer func() {
-		if err == nil {
-			return
-		}
-		if jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
-			logrus.WithError(err).Warn("spdk gRPC server: marking all non-stopped and non-error replicas and engines as error")
-			for _, r := range replicaMapForSync {
-				r.SetErrorState()
-			}
-			for _, e := range engineMapForSync {
-				e.SetErrorState()
-			}
+		if locked {
+			s.Unlock()
 		}
 	}()
 
+	state := s.newVerifyState()
+
+	defer func() {
+		s.handleVerifyError(err, state)
+	}()
+
+	s.trySelfHealHotplug()
+
+	if err = s.rebuildCachedLvolObjects(state); err != nil {
+		return err
+	}
+
+	if len(s.replicaMap) != len(state.replicaMap) {
+		logrus.Infof("spdk gRPC server: replica map updated, map count is changed from %d to %d", len(s.replicaMap), len(state.replicaMap))
+	}
+
+	s.replicaMap = state.replicaMap
+	s.backingImageMap = state.backingImageMap
+	s.UpdateEngineMetrics()
+
+	s.Unlock()
+	locked = false
+
+	return s.syncVerifiedObjects(state)
+}
+
+func (s *Server) newVerifyState() *verifyState {
+	state := &verifyState{
+		replicaMap:            map[string]*Replica{},
+		replicaMapForSync:     map[string]*Replica{},
+		engineMapForSync:      map[string]*Engine{},
+		engineFrontendForSync: map[string]*EngineFrontend{},
+		backingImageMap:       map[string]*BackingImage{},
+		backingImageForSync:   map[string]*BackingImage{},
+		spdkClient:            s.spdkClient,
+	}
+
+	for k, v := range s.replicaMap {
+		state.replicaMap[k] = v
+		state.replicaMapForSync[k] = v
+	}
+	for k, v := range s.engineMap {
+		state.engineMapForSync[k] = v
+	}
+	for k, v := range s.engineFrontendMap {
+		state.engineFrontendForSync[k] = v
+	}
+	for k, v := range s.backingImageMap {
+		state.backingImageMap[k] = v
+		state.backingImageForSync[k] = v
+	}
+
+	return state
+}
+
+func (s *Server) handleVerifyError(err error, state *verifyState) {
+	if err == nil {
+		return
+	}
+	if jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
+		logrus.WithError(err).Warn("spdk gRPC server: marking all non-stopped and non-error replicas and engines as error")
+		for _, r := range state.replicaMapForSync {
+			r.SetErrorState()
+		}
+		for _, e := range state.engineMapForSync {
+			e.SetErrorState()
+		}
+		for _, ef := range state.engineFrontendForSync {
+			ef.SetErrorState()
+		}
+	}
+}
+
+func (s *Server) trySelfHealHotplug() {
 	// Self-heal: re-enable hotplug only if no disks are being created and the last enablement failed.
 	isDiskCreating := false
 	for _, disk := range s.diskMap {
-		if disk.State == DiskStateCreating {
+		if disk.GetState() == DiskStateCreating {
 			isDiskCreating = true
 			break
 		}
 	}
 	if !isDiskCreating && !s.hotplugActive.Load() {
-		if success := setNvmeHotPlug(spdkClient, true); success {
+		if success := setNvmeHotPlug(s.spdkClient, true); success {
 			s.hotplugActive.Store(true)
 		}
 	}
+}
 
-	// Detect if the lvol bdev is an uncached replica or backing image.
-	// But cannot detect if a RAID bdev is an engine since:
-	//   1. we don't know the frontend
-	//   2. RAID bdevs are not persist objects in SPDK. After spdk_tgt start/restart, there is no RAID bdev hence there is no need to do detection.
-	// TODO: May need to cache Disks as well.
-	bdevList, err := spdkClient.BdevGetBdevs("", 0)
-	if err != nil {
-		s.Unlock()
-		return err
-	}
+func buildBdevLvolMap(bdevList []spdktypes.BdevInfo) map[string]*spdktypes.BdevInfo {
 	bdevLvolMap := map[string]*spdktypes.BdevInfo{}
 	for idx := range bdevList {
 		bdev := &bdevList[idx]
@@ -270,44 +331,58 @@ func (s *Server) verify() (err error) {
 		}
 		bdevLvolMap[spdktypes.GetLvolNameFromAlias(bdev.Aliases[0])] = bdev
 	}
-	lvsList, err := spdkClient.BdevLvolGetLvstore("", "")
-	if err != nil {
-		s.Unlock()
-		return err
-	}
+	return bdevLvolMap
+}
+
+func buildLvsUUIDNameMap(lvsList []spdktypes.LvstoreInfo) map[string]string {
 	lvsUUIDNameMap := map[string]string{}
 	for _, lvs := range lvsList {
 		lvsUUIDNameMap[lvs.UUID] = lvs.Name
 	}
-	// Backing image lvol name will be "bi-${biName}-disk-${lvsUUID}"
-	// Backing image temp lvol name will be "bi-${biName}-disk-${lvsUUID}-temp-head"
+	return lvsUUIDNameMap
+}
+
+func (s *Server) rebuildCachedLvolObjects(state *verifyState) error {
+	bdevList, err := state.spdkClient.BdevGetBdevs("", 0)
+	if err != nil {
+		return err
+	}
+	bdevLvolMap := buildBdevLvolMap(bdevList)
+
+	lvsList, err := state.spdkClient.BdevLvolGetLvstore("", "")
+	if err != nil {
+		return err
+	}
+	lvsUUIDNameMap := buildLvsUUIDNameMap(lvsList)
+
+	// Detect if the lvol bdev is an uncached replica or backing image.
 	for lvolName, bdevLvol := range bdevLvolMap {
 		if bdevLvol.DriverSpecific.Lvol.Snapshot && !types.IsBackingImageSnapLvolName(lvolName) {
 			continue
 		}
 		if types.IsBackingImageTempHead(lvolName) {
-			if s.backingImageMap[types.GetBackingImageSnapLvolNameFromTempHeadLvolName(lvolName)] == nil {
+			if state.backingImageMap[types.GetBackingImageSnapLvolNameFromTempHeadLvolName(lvolName)] == nil {
 				lvsUUID := bdevLvol.DriverSpecific.Lvol.LvolStoreUUID
 				logrus.Infof("Found one backing image temp head lvol %v while there is no backing image record in the server", lvolName)
-				if err := cleanupOrphanBackingImageTempHead(spdkClient, lvsUUIDNameMap[lvsUUID], lvolName); err != nil {
+				if err := cleanupOrphanBackingImageTempHead(state.spdkClient, lvsUUIDNameMap[lvsUUID], lvolName); err != nil {
 					logrus.WithError(err).Warnf("Failed to clean up orphan backing image temp head")
 				}
 			}
 			continue
 		}
-		if replicaMap[lvolName] != nil {
+		if state.replicaMap[lvolName] != nil {
 			continue
 		}
-		if s.backingImageMap[lvolName] != nil {
+		if state.backingImageMap[lvolName] != nil {
 			continue
 		}
 		if IsRebuildingLvol(lvolName) {
-			if replicaMap[GetReplicaNameFromRebuildingLvolName(lvolName)] != nil {
+			if state.replicaMap[GetReplicaNameFromRebuildingLvolName(lvolName)] != nil {
 				continue
 			}
 		}
 		if IsCloningLvol(lvolName) {
-			if replicaMap[GetReplicaNameFromCloningLvolName(lvolName)] != nil {
+			if state.replicaMap[GetReplicaNameFromCloningLvolName(lvolName)] != nil {
 				continue
 			}
 		}
@@ -320,32 +395,33 @@ func (s *Server) verify() (err error) {
 			}
 			size := bdevLvol.NumBlocks * uint64(bdevLvol.BlockSize)
 			alias := bdevLvol.Aliases[0]
-			expectedChecksum, err := GetSnapXattr(spdkClient, alias, types.LonghornBackingImageSnapshotAttrChecksum)
+			expectedChecksum, err := GetSnapXattr(state.spdkClient, alias, types.LonghornBackingImageSnapshotAttrChecksum)
 			if err != nil {
 				logrus.WithError(err).Warnf("failed to retrieve checksum attribute for backing image snapshot %v", alias)
 				continue
 			}
-			backingImageUUID, err := GetSnapXattr(spdkClient, alias, types.LonghornBackingImageSnapshotAttrUUID)
+			backingImageUUID, err := GetSnapXattr(state.spdkClient, alias, types.LonghornBackingImageSnapshotAttrUUID)
 			if err != nil {
 				logrus.WithError(err).Warnf("failed to retrieve backing image UUID attribute for snapshot %v", alias)
 				continue
 			}
 			backingImage := NewBackingImage(s.ctx, backingImageName, backingImageUUID, lvsUUID, size, expectedChecksum, s.updateChs[types.InstanceTypeBackingImage])
 			backingImage.Alias = alias
-			// For uncahced backing image, we set the state to pending first, so we can distinguish it from the cached but starting backing image
 			backingImage.State = types.BackingImageStatePending
-			backingImageMapForSync[lvolName] = backingImage
-			backingImageMap[lvolName] = backingImage
+			state.backingImageForSync[lvolName] = backingImage
+			state.backingImageMap[lvolName] = backingImage
 		} else if IsProbablyReplicaName(lvolName) {
 			lvsUUID := bdevLvol.DriverSpecific.Lvol.LvolStoreUUID
 			specSize := bdevLvol.NumBlocks * uint64(bdevLvol.BlockSize)
 			actualSize := bdevLvol.DriverSpecific.Lvol.NumAllocatedClusters * uint64(defaultClusterSize)
-			replicaMap[lvolName] = NewReplica(s.ctx, lvolName, lvsUUIDNameMap[lvsUUID], lvsUUID, specSize, true, s.updateChs[types.InstanceTypeReplica])
-			replicaMapForSync[lvolName] = replicaMap[lvolName]
+			state.replicaMap[lvolName] = NewReplica(s.ctx, lvolName, lvsUUIDNameMap[lvsUUID], lvsUUID, specSize, true, s.updateChs[types.InstanceTypeReplica])
+			state.replicaMapForSync[lvolName] = state.replicaMap[lvolName]
 			logrus.Infof("Detected one possible existing replica %s(%s) with disk %s(%s), spec size %d, actual size %d", bdevLvol.Aliases[0], bdevLvol.UUID, lvsUUIDNameMap[lvsUUID], lvsUUID, specSize, actualSize)
 		}
 	}
-	for replicaName, r := range replicaMap {
+
+	// Remove replicas from the cache if their lvol bdevs are gone.
+	for replicaName, r := range state.replicaMap {
 		// Try the best to avoid eliminating broken replicas or rebuilding replicas
 		if bdevLvolMap[r.Name] == nil {
 			if r.IsRebuilding() {
@@ -359,37 +435,36 @@ func (s *Server) verify() (err error) {
 				}
 			}
 			if noReplicaLvol {
-				delete(replicaMap, replicaName)
-				delete(replicaMapForSync, replicaName)
-				continue
+				delete(state.replicaMap, replicaName)
+				delete(state.replicaMapForSync, replicaName)
 			}
 		}
 	}
-	if len(s.replicaMap) != len(replicaMap) {
-		logrus.Infof("spdk gRPC server: replica map updated, map count is changed from %d to %d", len(s.replicaMap), len(replicaMap))
-	}
-	s.replicaMap = replicaMap
-	s.backingImageMap = backingImageMap
-	s.UpdateEngineMetrics()
-	s.Unlock()
 
-	for _, r := range replicaMapForSync {
-		err = r.Sync(spdkClient)
-		if err != nil && jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
+	return nil
+}
+
+func (s *Server) syncVerifiedObjects(state *verifyState) error {
+	for _, r := range state.replicaMapForSync {
+		if err := r.Sync(state.spdkClient); err != nil && jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
 			return err
 		}
 	}
 
-	for _, e := range engineMapForSync {
-		err = e.ValidateAndUpdate(spdkClient)
-		if err != nil && jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
+	for _, e := range state.engineMapForSync {
+		if err := e.ValidateAndUpdate(state.spdkClient); err != nil && jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
 			return err
 		}
 	}
 
-	for _, bi := range backingImageMapForSync {
-		err = bi.ValidateAndUpdate(spdkClient)
-		if err != nil {
+	for _, ef := range state.engineFrontendForSync {
+		if err := ef.ValidateAndUpdate(state.spdkClient); err != nil && jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
+			return err
+		}
+	}
+
+	for _, bi := range state.backingImageForSync {
+		if err := bi.ValidateAndUpdate(state.spdkClient); err != nil {
 			if jsonrpc.IsJSONRPCRespErrorBrokenPipe(err) {
 				return err
 			}
@@ -398,7 +473,6 @@ func (s *Server) verify() (err error) {
 	}
 
 	// TODO: send update signals if there is a Replica/Replica change
-
 	return nil
 }
 
@@ -413,6 +487,8 @@ func (s *Server) broadcasting() {
 			s.broadcastChs[types.InstanceTypeReplica] <- nil
 		case <-s.updateChs[types.InstanceTypeEngine]:
 			s.broadcastChs[types.InstanceTypeEngine] <- nil
+		case <-s.updateChs[types.InstanceTypeEngineFrontend]:
+			s.broadcastChs[types.InstanceTypeEngineFrontend] <- nil
 		case <-s.updateChs[types.InstanceTypeBackingImage]:
 			s.broadcastChs[types.InstanceTypeBackingImage] <- nil
 		}
@@ -426,6 +502,8 @@ func (s *Server) Subscribe(instanceType types.InstanceType) (<-chan interface{},
 	switch instanceType {
 	case types.InstanceTypeEngine:
 		return s.broadcasters[types.InstanceTypeEngine].Subscribe(context.TODO(), s.engineBroadcastConnector)
+	case types.InstanceTypeEngineFrontend:
+		return s.broadcasters[types.InstanceTypeEngineFrontend].Subscribe(context.TODO(), s.engineFrontendBroadcastConnector)
 	case types.InstanceTypeReplica:
 		return s.broadcasters[types.InstanceTypeReplica].Subscribe(context.TODO(), s.replicaBroadcastConnector)
 	case types.InstanceTypeBackingImage:
@@ -440,6 +518,10 @@ func (s *Server) replicaBroadcastConnector() (chan interface{}, error) {
 
 func (s *Server) engineBroadcastConnector() (chan interface{}, error) {
 	return s.broadcastChs[types.InstanceTypeEngine], nil
+}
+
+func (s *Server) engineFrontendBroadcastConnector() (chan interface{}, error) {
+	return s.broadcastChs[types.InstanceTypeEngineFrontend], nil
 }
 
 func (s *Server) backingImageBroadcastConnector() (chan interface{}, error) {
@@ -474,7 +556,9 @@ func (s *Server) isLvsExist(lvsUUID, lvsName string) (bool, error) {
 
 func (s *Server) newReplica(req *spdkrpc.ReplicaCreateRequest) (*Replica, error) {
 	s.Lock()
-	defer s.Unlock()
+	defer func() {
+		s.Unlock()
+	}()
 
 	r, ok := s.replicaMap[req.Name]
 	if ok {
@@ -540,6 +624,7 @@ func (s *Server) getBackingImage(backingImageName, lvsUUID string) (backingImage
 	return backingImage, nil
 }
 
+// ReplicaDelete deletes a replica
 func (s *Server) ReplicaDelete(ctx context.Context, req *spdkrpc.ReplicaDeleteRequest) (ret *emptypb.Empty, err error) {
 	s.RLock()
 	r := s.replicaMap[req.Name]
@@ -563,6 +648,7 @@ func (s *Server) ReplicaDelete(ctx context.Context, req *spdkrpc.ReplicaDeleteRe
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaGet returns a specific replica
 func (s *Server) ReplicaGet(ctx context.Context, req *spdkrpc.ReplicaGetRequest) (ret *spdkrpc.Replica, err error) {
 	s.RLock()
 	r := s.replicaMap[req.Name]
@@ -575,6 +661,7 @@ func (s *Server) ReplicaGet(ctx context.Context, req *spdkrpc.ReplicaGetRequest)
 	return r.Get(), nil
 }
 
+// ReplicaExpand expands a replica
 func (s *Server) ReplicaExpand(ctx context.Context, req *spdkrpc.ReplicaExpandRequest) (ret *emptypb.Empty, err error) {
 	s.RLock()
 	r := s.replicaMap[req.Name]
@@ -591,6 +678,7 @@ func (s *Server) ReplicaExpand(ctx context.Context, req *spdkrpc.ReplicaExpandRe
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaList returns all replicas
 func (s *Server) ReplicaList(ctx context.Context, req *emptypb.Empty) (*spdkrpc.ReplicaListResponse, error) {
 	replicaMap := map[string]*Replica{}
 	res := map[string]*spdkrpc.Replica{}
@@ -608,6 +696,7 @@ func (s *Server) ReplicaList(ctx context.Context, req *emptypb.Empty) (*spdkrpc.
 	return &spdkrpc.ReplicaListResponse{Replicas: res}, nil
 }
 
+// ReplicaWatch returns a stream of replica updates
 func (s *Server) ReplicaWatch(req *emptypb.Empty, srv spdkrpc.SPDKService_ReplicaWatchServer) error {
 	responseCh, err := s.Subscribe(types.InstanceTypeReplica)
 	if err != nil {
@@ -642,6 +731,7 @@ func (s *Server) ReplicaWatch(req *emptypb.Empty, srv spdkrpc.SPDKService_Replic
 	return nil
 }
 
+// ReplicaSnapshotCreate creates a snapshot for a replica
 func (s *Server) ReplicaSnapshotCreate(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *spdkrpc.Replica, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -667,6 +757,7 @@ func (s *Server) ReplicaSnapshotCreate(ctx context.Context, req *spdkrpc.Snapsho
 	return r.SnapshotCreate(spdkClient, req.SnapshotName, opts)
 }
 
+// ReplicaSnapshotDelete deletes a snapshot for a replica
 func (s *Server) ReplicaSnapshotDelete(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -688,6 +779,7 @@ func (s *Server) ReplicaSnapshotDelete(ctx context.Context, req *spdkrpc.Snapsho
 	return &emptypb.Empty{}, err
 }
 
+// ReplicaSnapshotRevert reverts a snapshot for a replica
 func (s *Server) ReplicaSnapshotRevert(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" || req.SnapshotName == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name and snapshot name are required")
@@ -706,6 +798,7 @@ func (s *Server) ReplicaSnapshotRevert(ctx context.Context, req *spdkrpc.Snapsho
 	return &emptypb.Empty{}, err
 }
 
+// ReplicaSnapshotPurge purges all snapshots for a replica
 func (s *Server) ReplicaSnapshotPurge(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -724,6 +817,7 @@ func (s *Server) ReplicaSnapshotPurge(ctx context.Context, req *spdkrpc.Snapshot
 	return &emptypb.Empty{}, err
 }
 
+// ReplicaSnapshotHash hashes a snapshot for a replica
 func (s *Server) ReplicaSnapshotHash(ctx context.Context, req *spdkrpc.SnapshotHashRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -742,6 +836,7 @@ func (s *Server) ReplicaSnapshotHash(ctx context.Context, req *spdkrpc.SnapshotH
 	return &emptypb.Empty{}, err
 }
 
+// ReplicaSnapshotHashStatus returns the hash status of a snapshot for a replica
 func (s *Server) ReplicaSnapshotHashStatus(ctx context.Context, req *spdkrpc.SnapshotHashStatusRequest) (ret *spdkrpc.ReplicaSnapshotHashStatusResponse, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -764,6 +859,7 @@ func (s *Server) ReplicaSnapshotHashStatus(ctx context.Context, req *spdkrpc.Sna
 	}, err
 }
 
+// ReplicaSnapshotRangeHashGet returns the range hash of a snapshot for a replica
 func (s *Server) ReplicaSnapshotRangeHashGet(ctx context.Context, req *spdkrpc.ReplicaSnapshotRangeHashGetRequest) (ret *spdkrpc.ReplicaSnapshotRangeHashGetResponse, err error) {
 	if req.Name == "" || req.SnapshotName == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name and snapshot name are required")
@@ -784,6 +880,7 @@ func (s *Server) ReplicaSnapshotRangeHashGet(ctx context.Context, req *spdkrpc.R
 	}, err
 }
 
+// ReplicaSnapshotCloneDstStart starts a clone for a snapshot for a replica
 func (s *Server) ReplicaSnapshotCloneDstStart(ctx context.Context, req *spdkrpc.ReplicaSnapshotCloneDstStartRequest) (ret *emptypb.Empty, err error) {
 	if err := util.VerifyParams(
 		util.Param{Name: "name", Value: req.Name},
@@ -809,6 +906,7 @@ func (s *Server) ReplicaSnapshotCloneDstStart(ctx context.Context, req *spdkrpc.
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaSnapshotCloneDstStatusCheck checks the status of a clone for a snapshot for a replica
 func (s *Server) ReplicaSnapshotCloneDstStatusCheck(ctx context.Context, req *spdkrpc.ReplicaSnapshotCloneDstStatusCheckRequest) (ret *spdkrpc.ReplicaSnapshotCloneDstStatusCheckResponse, err error) {
 	if err := util.VerifyParams(
 		util.Param{Name: "name", Value: req.Name},
@@ -827,6 +925,7 @@ func (s *Server) ReplicaSnapshotCloneDstStatusCheck(ctx context.Context, req *sp
 	return r.SnapshotCloneDstStatusCheck()
 }
 
+// ReplicaSnapshotCloneSrcStart starts a clone for a snapshot for a replica
 func (s *Server) ReplicaSnapshotCloneSrcStart(ctx context.Context, req *spdkrpc.ReplicaSnapshotCloneSrcStartRequest) (ret *emptypb.Empty, err error) {
 	if err := util.VerifyParams(
 		util.Param{Name: "name", Value: req.Name},
@@ -851,6 +950,7 @@ func (s *Server) ReplicaSnapshotCloneSrcStart(ctx context.Context, req *spdkrpc.
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaSnapshotCloneSrcStatusCheck checks the status of a clone for a snapshot for a replica
 func (s *Server) ReplicaSnapshotCloneSrcStatusCheck(ctx context.Context, req *spdkrpc.ReplicaSnapshotCloneSrcStatusCheckRequest) (ret *spdkrpc.ReplicaSnapshotCloneSrcStatusCheckResponse, err error) {
 	if err := util.VerifyParams(
 		util.Param{Name: "name", Value: req.Name},
@@ -872,6 +972,7 @@ func (s *Server) ReplicaSnapshotCloneSrcStatusCheck(ctx context.Context, req *sp
 	return r.SnapshotCloneSrcStatusCheck(spdkClient, req.SnapshotName, req.DstReplicaName)
 }
 
+// ReplicaSnapshotCloneSrcFinish finishes a clone for a snapshot for a replica
 func (s *Server) ReplicaSnapshotCloneSrcFinish(ctx context.Context, req *spdkrpc.ReplicaSnapshotCloneSrcFinishRequest) (ret *emptypb.Empty, err error) {
 	if err := util.VerifyParams(
 		util.Param{Name: "name", Value: req.Name},
@@ -895,6 +996,7 @@ func (s *Server) ReplicaSnapshotCloneSrcFinish(ctx context.Context, req *spdkrpc
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaRebuildingSrcStart starts a rebuilding for a replica
 func (s *Server) ReplicaRebuildingSrcStart(ctx context.Context, req *spdkrpc.ReplicaRebuildingSrcStartRequest) (ret *spdkrpc.ReplicaRebuildingSrcStartResponse, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -922,6 +1024,7 @@ func (s *Server) ReplicaRebuildingSrcStart(ctx context.Context, req *spdkrpc.Rep
 	return &spdkrpc.ReplicaRebuildingSrcStartResponse{ExposedSnapshotLvolAddress: exposedSnapshotLvolAddress}, nil
 }
 
+// ReplicaRebuildingSrcFinish finishes a rebuilding for a replica
 func (s *Server) ReplicaRebuildingSrcFinish(ctx context.Context, req *spdkrpc.ReplicaRebuildingSrcFinishRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -945,6 +1048,7 @@ func (s *Server) ReplicaRebuildingSrcFinish(ctx context.Context, req *spdkrpc.Re
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaRebuildingSrcShallowCopyStart starts a shallow copy for a rebuilding for a replica
 func (s *Server) ReplicaRebuildingSrcShallowCopyStart(ctx context.Context, req *spdkrpc.ReplicaRebuildingSrcShallowCopyStartRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -972,6 +1076,7 @@ func (s *Server) ReplicaRebuildingSrcShallowCopyStart(ctx context.Context, req *
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaRebuildingSrcRangeShallowCopyStart starts a range shallow copy for a rebuilding for a replica
 func (s *Server) ReplicaRebuildingSrcRangeShallowCopyStart(ctx context.Context, req *spdkrpc.ReplicaRebuildingSrcRangeShallowCopyStartRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -1002,6 +1107,7 @@ func (s *Server) ReplicaRebuildingSrcRangeShallowCopyStart(ctx context.Context, 
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaRebuildingSrcShallowCopyCheck checks the shallow copy for a rebuilding for a replica
 func (s *Server) ReplicaRebuildingSrcShallowCopyCheck(ctx context.Context, req *spdkrpc.ReplicaRebuildingSrcShallowCopyCheckRequest) (ret *spdkrpc.ReplicaRebuildingSrcShallowCopyCheckResponse, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -1021,6 +1127,7 @@ func (s *Server) ReplicaRebuildingSrcShallowCopyCheck(ctx context.Context, req *
 	return r.RebuildingSrcShallowCopyCheck(req.SnapshotName)
 }
 
+// ReplicaRebuildingDstStart starts a rebuilding for a replica
 func (s *Server) ReplicaRebuildingDstStart(ctx context.Context, req *spdkrpc.ReplicaRebuildingDstStartRequest) (ret *spdkrpc.ReplicaRebuildingDstStartResponse, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -1055,6 +1162,7 @@ func (s *Server) ReplicaRebuildingDstStart(ctx context.Context, req *spdkrpc.Rep
 	return &spdkrpc.ReplicaRebuildingDstStartResponse{DstHeadLvolAddress: address}, nil
 }
 
+// ReplicaRebuildingDstFinish finishes a rebuilding for a replica
 func (s *Server) ReplicaRebuildingDstFinish(ctx context.Context, req *spdkrpc.ReplicaRebuildingDstFinishRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -1075,6 +1183,7 @@ func (s *Server) ReplicaRebuildingDstFinish(ctx context.Context, req *spdkrpc.Re
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaRebuildingDstShallowCopyStart starts a shallow copy for a rebuilding for a replica
 func (s *Server) ReplicaRebuildingDstShallowCopyStart(ctx context.Context, req *spdkrpc.ReplicaRebuildingDstShallowCopyStartRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -1098,6 +1207,7 @@ func (s *Server) ReplicaRebuildingDstShallowCopyStart(ctx context.Context, req *
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaRebuildingDstShallowCopyCheck checks the shallow copy for a rebuilding for a replica
 func (s *Server) ReplicaRebuildingDstShallowCopyCheck(ctx context.Context, req *spdkrpc.ReplicaRebuildingDstShallowCopyCheckRequest) (ret *spdkrpc.ReplicaRebuildingDstShallowCopyCheckResponse, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
@@ -1115,6 +1225,7 @@ func (s *Server) ReplicaRebuildingDstShallowCopyCheck(ctx context.Context, req *
 	return r.RebuildingDstShallowCopyCheck(spdkClient)
 }
 
+// ReplicaRebuildingDstSnapshotCreate creates a snapshot for a rebuilding for a replica
 func (s *Server) ReplicaRebuildingDstSnapshotCreate(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" || req.SnapshotName == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name and snapshot name are required")
@@ -1140,6 +1251,7 @@ func (s *Server) ReplicaRebuildingDstSnapshotCreate(ctx context.Context, req *sp
 	return &emptypb.Empty{}, nil
 }
 
+// ReplicaRebuildingDstSetQosLimit sets the QoS limit for a rebuilding for a replica
 func (s *Server) ReplicaRebuildingDstSetQosLimit(
 	ctx context.Context,
 	req *spdkrpc.ReplicaRebuildingDstSetQosLimitRequest,
@@ -1167,43 +1279,38 @@ func (s *Server) ReplicaRebuildingDstSetQosLimit(
 	return &emptypb.Empty{}, nil
 }
 
+// EngineCreate creates an engine
 func (s *Server) EngineCreate(ctx context.Context, req *spdkrpc.EngineCreateRequest) (ret *spdkrpc.Engine, err error) {
-	if req.Name == "" || req.VolumeName == "" {
-		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name and volume name are required")
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	}
+	if req.VolumeName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine volume name is required")
 	}
 	if req.SpecSize == 0 {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine spec size is required")
 	}
-	if req.Frontend != types.FrontendSPDKTCPBlockdev && req.Frontend != types.FrontendSPDKTCPNvmf && req.Frontend != types.FrontendEmpty && req.Frontend != types.FrontendUBLK {
-		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend is required")
-	}
 
 	s.Lock()
+
 	e, ok := s.engineMap[req.Name]
 	if ok {
-		// Check if the engine already exists.
-		// If the engine exists and the initiator address is the same as the target address, return AlreadyExists error.
-		if localTargetExists(e) && req.InitiatorAddress == req.TargetAddress {
-			s.Unlock()
-			return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", req.Name)
-		}
+		s.Unlock()
+		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine %v already exists", req.Name)
 	}
 
 	if e == nil {
-		s.engineMap[req.Name] = NewEngine(req.Name, req.VolumeName, req.Frontend, req.SpecSize, s.updateChs[types.InstanceTypeEngine], req.UblkQueueDepth, req.UblkNumberOfQueue)
+		s.engineMap[req.Name] = NewEngine(req.Name, req.VolumeName, req.Frontend, req.SpecSize, s.updateChs[types.InstanceTypeEngine])
 		e = s.engineMap[req.Name]
 	}
 
 	spdkClient := s.spdkClient
 	s.Unlock()
 
-	return e.Create(spdkClient, req.ReplicaAddressMap, req.PortCount, s.portAllocator, req.InitiatorAddress, req.TargetAddress, req.SalvageRequested)
+	return e.Create(spdkClient, req.ReplicaAddressMap, req.PortCount, s.portAllocator, req.SalvageRequested)
 }
 
-func localTargetExists(e *Engine) bool {
-	return e.NvmeTcpFrontend != nil && e.NvmeTcpFrontend.Port != 0 && e.NvmeTcpFrontend.TargetPort != 0
-}
-
+// EngineDelete deletes an engine
 func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequest) (ret *emptypb.Empty, err error) {
 	s.RLock()
 	e := s.engineMap[req.Name]
@@ -1227,47 +1334,6 @@ func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequ
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Server) EngineSuspend(ctx context.Context, req *spdkrpc.EngineSuspendRequest) (ret *emptypb.Empty, err error) {
-	if req.Name == "" {
-		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
-	}
-
-	s.RLock()
-	e := s.engineMap[req.Name]
-	s.RUnlock()
-
-	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for suspension", req.Name)
-	}
-
-	err = e.Suspend(s.spdkClient)
-	if err != nil {
-		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to suspend engine %v", req.Name).Error())
-	}
-
-	return &emptypb.Empty{}, nil
-}
-
-func (s *Server) EngineResume(ctx context.Context, req *spdkrpc.EngineResumeRequest) (ret *emptypb.Empty, err error) {
-	if req.Name == "" {
-		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
-	}
-
-	s.RLock()
-	e := s.engineMap[req.Name]
-	s.RUnlock()
-
-	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for resumption", req.Name)
-	}
-
-	err = e.Resume(s.spdkClient)
-	if err != nil {
-		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to resume engine %v", req.Name).Error())
-	}
-
-	return &emptypb.Empty{}, nil
-}
 func (s *Server) EngineExpand(ctx context.Context, req *spdkrpc.EngineExpandRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
@@ -1285,17 +1351,19 @@ func (s *Server) EngineExpand(ctx context.Context, req *spdkrpc.EngineExpandRequ
 		return nil, grpcstatus.Errorf(grpccodes.Unimplemented, "cannot expand ublk frontend engine %v", req.Name)
 	}
 
-	err = e.Expand(s.spdkClient, req.Size, s.portAllocator)
+	err = e.Expand(s.spdkClient, req.Size)
 	if err != nil {
-		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to expand engine %v", req.Name).Error())
+		return nil, toExpansionGRPCError(err, "failed to expand engine %v", req.Name)
 	}
 
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Server) EngineSwitchOverTarget(ctx context.Context, req *spdkrpc.EngineSwitchOverTargetRequest) (ret *emptypb.Empty, err error) {
-	if req.Name == "" || req.TargetAddress == "" {
-		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name and target address are required")
+func (s *Server) EngineExpandPrecheck(ctx context.Context, req *spdkrpc.EngineExpandPrecheckRequest) (*spdkrpc.EngineExpandPrecheckResponse, error) {
+	if req.Name == "" {
+		return &spdkrpc.EngineExpandPrecheckResponse{
+			ExpansionRequired: false,
+		}, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
 	}
 
 	s.RLock()
@@ -1303,50 +1371,164 @@ func (s *Server) EngineSwitchOverTarget(ctx context.Context, req *spdkrpc.Engine
 	s.RUnlock()
 
 	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for target switchover", req.Name)
+		return &spdkrpc.EngineExpandPrecheckResponse{}, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for expansion", req.Name)
 	}
 
-	err = e.SwitchOverTarget(s.spdkClient, req.TargetAddress)
+	requireExpansion, err := e.ExpandPrecheck(s.spdkClient, req.Size)
 	if err != nil {
-		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to switch over target for engine %v", req.Name).Error())
+		return &spdkrpc.EngineExpandPrecheckResponse{
+			ExpansionRequired: false,
+		}, toExpansionGRPCError(err, "failed to precheck expand engine %v", req.Name)
+	}
+
+	return &spdkrpc.EngineExpandPrecheckResponse{
+		ExpansionRequired: requireExpansion,
+	}, nil
+}
+
+func (s *Server) EngineFrontendSwitchOver(ctx context.Context, req *spdkrpc.EngineFrontendSwitchOverRequest) (ret *emptypb.Empty, err error) {
+	if req == nil {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "request is required")
+	}
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend or engine name is required")
+	}
+	if req.TargetAddress == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "target address is required")
+	}
+	if targetIP, targetPort, splitErr := splitHostPort(req.TargetAddress); splitErr != nil || targetIP == "" || targetPort == 0 {
+		return nil, grpcstatus.Errorf(grpccodes.InvalidArgument, "invalid target address %q", req.TargetAddress)
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	if ef == nil {
+		// Backward compatible lookup: allow name to be engine name if there is exactly one frontend.
+		for _, frontend := range s.engineFrontendMap {
+			if frontend.EngineName != req.Name {
+				continue
+			}
+			if ef != nil {
+				s.RUnlock()
+				return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "multiple engine frontends found for engine %s", req.Name)
+			}
+			ef = frontend
+		}
+	}
+	spdkClient := s.spdkClient
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend or engine %v for target switchover", req.Name)
+	}
+
+	if err := ef.SwitchOverTarget(spdkClient, req.EngineName, req.TargetAddress); err != nil {
+		return nil, toSwitchOverGRPCError(err, "failed to switch over target for %s", req.Name)
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func toSwitchOverGRPCError(err error, format string, args ...interface{}) error {
+	code := grpccodes.Internal
+
+	// Preserve downstream gRPC code when available.
+	if statusErr, ok := grpcstatus.FromError(errors.UnwrapAll(err)); ok {
+		code = statusErr.Code()
+	} else {
+		switch {
+		case errors.Is(err, ErrSwitchOverTargetInvalidInput):
+			code = grpccodes.InvalidArgument
+		case errors.Is(err, ErrSwitchOverTargetPrecondition):
+			code = grpccodes.FailedPrecondition
+		case errors.Is(err, ErrSwitchOverTargetEngineNotFound):
+			code = grpccodes.NotFound
+		case errors.Is(err, context.DeadlineExceeded):
+			code = grpccodes.DeadlineExceeded
+		case errors.Is(err, context.Canceled):
+			code = grpccodes.Canceled
+		}
+	}
+
+	return grpcstatus.Error(code, errors.Wrapf(err, format, args...).Error())
+}
+
+func (s *Server) EngineFrontendSuspend(ctx context.Context, req *spdkrpc.EngineFrontendSuspendRequest) (ret *emptypb.Empty, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for suspension", req.Name)
+	}
+
+	err = ef.Suspend(s.spdkClient)
+	if err != nil {
+		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to suspend engine frontend %v", req.Name).Error())
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFrontendResumeRequest) (ret *emptypb.Empty, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for resumption", req.Name)
+	}
+
+	err = ef.Resume(s.spdkClient)
+	if err != nil {
+		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to resume engine frontend %v", req.Name).Error())
 	}
 
 	return &emptypb.Empty{}, nil
 }
 
 func (s *Server) EngineDeleteTarget(ctx context.Context, req *spdkrpc.EngineDeleteTargetRequest) (ret *emptypb.Empty, err error) {
-	if req.Name == "" {
-		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
-	}
+	// if req.Name == "" {
+	// 	return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	// }
 
-	s.RLock()
-	e := s.engineMap[req.Name]
-	s.RUnlock()
+	// s.RLock()
+	// e := s.engineMap[req.Name]
+	// s.RUnlock()
 
-	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %s for target deletion", req.Name)
-	}
+	// if e == nil {
+	// 	return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %s for target deletion", req.Name)
+	// }
 
-	defer func() {
-		if err == nil {
-			s.Lock()
-			// Only delete the engine if both initiator (e.Port) and target (e.TargetPort) are not exists.
-			if e.NvmeTcpFrontend.Port == 0 && e.NvmeTcpFrontend.TargetPort == 0 {
-				e.log.Info("Deleting engine %s", req.Name)
-				delete(s.engineMap, req.Name)
-			}
-			s.Unlock()
-		}
-	}()
+	// defer func() {
+	// 	if err == nil {
+	// 		s.Lock()
+	// 		// Only delete the engine if both initiator (e.Port) and target (e.TargetPort) are not exists.
+	// 		if e.NvmeTcpFrontend.TargetPort == 0 {
+	// 			e.log.Info("Deleting engine %s", req.Name)
+	// 			delete(s.engineMap, req.Name)
+	// 		}
+	// 		s.Unlock()
+	// 	}
+	// }()
 
-	err = e.DeleteTarget(s.spdkClient, s.portAllocator)
-	if err != nil {
-		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to delete target for engine %v", req.Name).Error())
-	}
+	// err = e.DeleteTarget(s.spdkClient, s.portAllocator)
+	// if err != nil {
+	// 	return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to delete target for engine %v", req.Name).Error())
+	// }
 
 	return &emptypb.Empty{}, nil
 }
 
+// EngineGet returns a specific engine
 func (s *Server) EngineGet(ctx context.Context, req *spdkrpc.EngineGetRequest) (ret *spdkrpc.Engine, err error) {
 	s.RLock()
 	e := s.engineMap[req.Name]
@@ -1359,6 +1541,7 @@ func (s *Server) EngineGet(ctx context.Context, req *spdkrpc.EngineGetRequest) (
 	return e.Get(), nil
 }
 
+// EngineList returns all engines
 func (s *Server) EngineList(ctx context.Context, req *emptypb.Empty) (*spdkrpc.EngineListResponse, error) {
 	engineMap := map[string]*Engine{}
 	res := map[string]*spdkrpc.Engine{}
@@ -1376,6 +1559,7 @@ func (s *Server) EngineList(ctx context.Context, req *emptypb.Empty) (*spdkrpc.E
 	return &spdkrpc.EngineListResponse{Engines: res}, nil
 }
 
+// EngineWatch returns a stream of engine updates
 func (s *Server) EngineWatch(req *emptypb.Empty, srv spdkrpc.SPDKService_EngineWatchServer) error {
 	responseCh, err := s.Subscribe(types.InstanceTypeEngine)
 	if err != nil {
@@ -1414,22 +1598,95 @@ func (s *Server) EngineReplicaAdd(ctx context.Context, req *spdkrpc.EngineReplic
 	if req.ReplicaName == "" || req.ReplicaAddress == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name and address are required")
 	}
+
+	phase := ""
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if values := md.Get(replicaAddPhaseMetadata); len(values) > 0 {
+			phase = strings.ToLower(values[0])
+		}
+	}
+
+	switch phase {
+	case replicaAddPhaseStart:
+		return s.EngineReplicaAddStart(ctx, req)
+	case replicaAddPhaseShallowCopy:
+		return s.EngineReplicaAddShallowCopy(ctx, req)
+	case replicaAddPhaseFinish:
+		return s.EngineReplicaAddFinish(ctx, req)
+	}
+
+	return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "replica add requires phase metadata and should be initiated via engine frontend")
+}
+
+func (s *Server) EngineReplicaAddStart(ctx context.Context, req *spdkrpc.EngineReplicaAddRequest) (ret *emptypb.Empty, err error) {
+	if req.ReplicaName == "" || req.ReplicaAddress == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name and address are required")
+	}
+
 	s.RLock()
 	e := s.engineMap[req.EngineName]
 	spdkClient := s.spdkClient
 	s.RUnlock()
 
-	log := logrus.WithFields(logrus.Fields{
-		"engine":      req.EngineName,
-		"replicaName": req.ReplicaName,
-	})
-	log.Info("Starting replica add")
-
 	if e == nil {
-		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s add", req.EngineName, req.ReplicaName, req.ReplicaAddress)
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s add start", req.EngineName, req.ReplicaName, req.ReplicaAddress)
+	}
+	return &emptypb.Empty{}, e.ReplicaAddStart(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync)
+}
+
+func (s *Server) EngineReplicaAddShallowCopy(ctx context.Context, req *spdkrpc.EngineReplicaAddRequest) (ret *emptypb.Empty, err error) {
+	if req.ReplicaName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
 	}
 
-	return &emptypb.Empty{}, e.ReplicaAdd(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync)
+	s.RLock()
+	e := s.engineMap[req.EngineName]
+	s.RUnlock()
+
+	if e == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s to shallow copy", req.EngineName, req.ReplicaName)
+	}
+	return &emptypb.Empty{}, e.ReplicaAddShallowCopy(req.ReplicaName)
+}
+
+func (s *Server) EngineReplicaAddFinish(ctx context.Context, req *spdkrpc.EngineReplicaAddRequest) (ret *emptypb.Empty, err error) {
+	if req.ReplicaName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name is required")
+	}
+
+	s.RLock()
+	e := s.engineMap[req.EngineName]
+	s.RUnlock()
+
+	if e == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s with address %s add finish", req.EngineName, req.ReplicaName, req.ReplicaAddress)
+	}
+	return &emptypb.Empty{}, e.ReplicaAddFinish(req.ReplicaName, nil)
+}
+
+func (s *Server) EngineFrontendReplicaAdd(ctx context.Context, req *spdkrpc.EngineFrontendReplicaAddRequest) (ret *emptypb.Empty, err error) {
+	if req.ReplicaName == "" || req.ReplicaAddress == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name and address are required")
+	}
+	s.RLock()
+	// Look up the engine frontend by matching EngineName, since the frontend
+	// may have a different name from the engine it manages.
+	var ef *EngineFrontend
+	ef, ok := s.engineFrontendMap[req.EngineFrontendName]
+	if !ok {
+		s.RUnlock()
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for replica %s with address %s add", req.EngineFrontendName, req.ReplicaName, req.ReplicaAddress)
+	}
+	spdkClient := s.spdkClient
+	s.RUnlock()
+
+	log := logrus.WithFields(logrus.Fields{
+		"engineFrontend": req.EngineFrontendName,
+		"replicaName":    req.ReplicaName,
+	})
+	log.Info("Starting frontend-aware replica add")
+
+	return &emptypb.Empty{}, ef.ReplicaAdd(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync)
 }
 
 func (s *Server) EngineReplicaList(ctx context.Context, req *spdkrpc.EngineReplicaListRequest) (ret *spdkrpc.EngineReplicaListResponse, err error) {
@@ -1839,14 +2096,14 @@ func (s *Server) DiskCreate(ctx context.Context, req *spdkrpc.DiskCreateRequest)
 
 	disk, exists := s.diskMap[req.DiskName]
 	if exists {
-		if disk.State == DiskStateReady {
+		if disk.GetState() == DiskStateReady {
 			s.Unlock()
 			return disk.DiskGet(spdkClient, req.DiskName, req.DiskPath, req.DiskDriver)
 		}
 		s.Unlock()
 
 		return &spdkrpc.Disk{
-			State: string(disk.State),
+			State: string(disk.GetState()),
 		}, nil
 	}
 
@@ -1911,7 +2168,7 @@ func (s *Server) DiskCreate(ctx context.Context, req *spdkrpc.DiskCreateRequest)
 	}(disk, req)
 
 	return &spdkrpc.Disk{
-		State: string(disk.State),
+		State: string(disk.GetState()),
 	}, nil
 }
 
@@ -2366,4 +2623,274 @@ func setNvmeHotPlug(spdkClient *spdkclient.Client, enable bool) (success bool) {
 		return false
 	}
 	return true
+}
+
+// EngineFrontendCreate creates a new engine frontend.
+func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFrontendCreateRequest) (ret *spdkrpc.EngineFrontend, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
+	}
+	if req.VolumeName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "volume name is required")
+	}
+	if req.EngineName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	}
+	if req.SpecSize == 0 {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "spec size is required")
+	}
+
+	if !types.IsFrontendSupported(req.Frontend) {
+		return nil, grpcstatus.Errorf(grpccodes.InvalidArgument, "frontend %v is not supported", req.Frontend)
+	}
+
+	s.Lock()
+	_, ok := s.engineFrontendMap[req.Name]
+	if ok {
+		s.Unlock()
+		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine frontend %v already exists", req.Name)
+	}
+
+	ef := NewEngineFrontend(req.Name, req.EngineName, req.VolumeName, req.Frontend, req.SpecSize,
+		req.UblkQueueDepth, req.UblkNumberOfQueue, s.updateChs[types.InstanceTypeEngineFrontend])
+	s.engineFrontendMap[req.Name] = ef
+
+	spdkClient := s.spdkClient
+	s.Unlock()
+
+	return ef.Create(spdkClient, req.TargetAddress)
+}
+
+// EngineFrontendDelete deletes an engine frontend.
+func (s *Server) EngineFrontendDelete(ctx context.Context, req *spdkrpc.EngineFrontendDeleteRequest) (ret *emptypb.Empty, err error) {
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	spdkClient := s.spdkClient
+	s.RUnlock()
+
+	defer func() {
+		if err != nil {
+			return
+		}
+
+		s.Lock()
+		delete(s.engineFrontendMap, req.Name)
+		s.Unlock()
+	}()
+
+	if ef == nil {
+		return &emptypb.Empty{}, nil
+	}
+
+	if err := ef.Delete(spdkClient); err != nil {
+		return nil, err
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+// EngineFrontendGet returns a specific engine frontend
+func (s *Server) EngineFrontendGet(ctx context.Context, req *spdkrpc.EngineFrontendGetRequest) (ret *spdkrpc.EngineFrontend, err error) {
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v", req.Name)
+	}
+
+	return ef.Get(), nil
+}
+
+// EngineFrontendList lists all engine frontends.
+func (s *Server) EngineFrontendList(ctx context.Context, req *emptypb.Empty) (*spdkrpc.EngineFrontendListResponse, error) {
+	engineFrontendMap := map[string]*EngineFrontend{}
+	res := map[string]*spdkrpc.EngineFrontend{}
+
+	s.RLock()
+	for k, v := range s.engineFrontendMap {
+		engineFrontendMap[k] = v
+	}
+	s.RUnlock()
+
+	for engineFrontendName, ef := range engineFrontendMap {
+		res[engineFrontendName] = ef.Get()
+	}
+
+	return &spdkrpc.EngineFrontendListResponse{EngineFrontends: res}, nil
+}
+
+// EngineFrontendWatch watches engine frontends.
+func (s *Server) EngineFrontendWatch(req *emptypb.Empty, srv spdkrpc.SPDKService_EngineFrontendWatchServer) error {
+	responseCh, err := s.Subscribe(types.InstanceTypeEngineFrontend)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			logrus.WithError(err).Error("SPDK service engine frontend watch errored out")
+		} else {
+			logrus.Info("SPDK service engine frontend watch ended successfully")
+		}
+	}()
+	logrus.Info("Started new SPDK service engine frontend update watch")
+
+	done := false
+	for {
+		select {
+		case <-s.ctx.Done():
+			logrus.Info("spdk gRPC server: stopped engine target watch due to the context done")
+			done = true
+		case <-responseCh:
+			if err := srv.Send(&emptypb.Empty{}); err != nil {
+				return err
+			}
+		}
+		if done {
+			break
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) EngineFrontendExpand(ctx context.Context, req *spdkrpc.EngineFrontendExpandRequest) (ret *emptypb.Empty, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v", req.Name)
+	}
+
+	if types.IsUblkFrontend(ef.Frontend) {
+		return nil, grpcstatus.Errorf(grpccodes.Unimplemented, "cannot expand ublk frontend engine %v", ef.Name)
+	}
+
+	err = ef.Expand(ctx, s.spdkClient, req.Size, s.portAllocator)
+	if err != nil {
+		return nil, toExpansionGRPCError(err, "failed to expand engine frontend %v", req.Name)
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func toExpansionGRPCError(err error, format string, args ...interface{}) error {
+	code := grpccodes.Internal
+
+	// Preserve downstream gRPC code when available.
+	if statusErr, ok := grpcstatus.FromError(errors.UnwrapAll(err)); ok {
+		code = statusErr.Code()
+	} else {
+		switch {
+		case errors.Is(err, ErrExpansionInProgress), errors.Is(err, ErrRestoringInProgress):
+			code = grpccodes.FailedPrecondition
+		case errors.Is(err, ErrExpansionInvalidSize):
+			code = grpccodes.InvalidArgument
+		case errors.Is(err, context.DeadlineExceeded):
+			code = grpccodes.DeadlineExceeded
+		case errors.Is(err, context.Canceled):
+			code = grpccodes.Canceled
+		}
+	}
+
+	return grpcstatus.Error(code, errors.Wrapf(err, format, args...).Error())
+}
+
+func (s *Server) EngineFrontendSnapshotCreate(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *spdkrpc.SnapshotResponse, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for snapshot creation", req.Name)
+	}
+
+	snapshotName, err := ef.SnapshotCreate(req.SnapshotName)
+	return &spdkrpc.SnapshotResponse{SnapshotName: snapshotName}, err
+}
+
+func (s *Server) EngineFrontendSnapshotDelete(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *emptypb.Empty, err error) {
+	if req.Name == "" || req.SnapshotName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name and snapshot name are required")
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for snapshot deletion", req.Name)
+	}
+
+	if err := ef.SnapshotDelete(req.SnapshotName); err != nil {
+		return nil, err
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) EngineFrontendSnapshotRevert(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *emptypb.Empty, err error) {
+	if req.Name == "" || req.SnapshotName == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name and snapshot name are required")
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for snapshot revert", req.Name)
+	}
+
+	if err := ef.SnapshotRevert(req.SnapshotName); err != nil {
+		return nil, err
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) EngineFrontendSnapshotPurge(ctx context.Context, req *spdkrpc.SnapshotRequest) (ret *emptypb.Empty, err error) {
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
+	}
+
+	s.RLock()
+	ef := s.engineFrontendMap[req.Name]
+	s.RUnlock()
+
+	if ef == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for snapshot purge", req.Name)
+	}
+
+	if err := ef.SnapshotPurge(); err != nil {
+		return nil, err
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
+// GetEngineStruct returns the internal Engine struct.
+// This is for testing purposes only to allow access to internal fields and methods not exposed via RPC.
+func (s *Server) GetEngineStruct(name string) *Engine {
+	s.RLock()
+	defer s.RUnlock()
+	return s.engineMap[name]
+}
+
+// GetReplicaStruct returns the internal Replica struct.
+// This is for testing purposes only to allow tests to inspect or manipulate internal replica state.
+func (s *Server) GetReplicaStruct(name string) *Replica {
+	s.RLock()
+	defer s.RUnlock()
+	return s.replicaMap[name]
 }
