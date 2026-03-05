@@ -7,6 +7,10 @@ import (
 	"github.com/longhorn/types/pkg/generated/spdkrpc"
 )
 
+const (
+	MetadataDir = "/metadata"
+)
+
 type Mode string
 
 const (

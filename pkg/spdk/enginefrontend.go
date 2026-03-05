@@ -74,6 +74,10 @@ type EngineFrontend struct {
 	// Test hook for endpoint retrieval after switchover.
 	getInitiatorEndpointFn func() string
 
+	// metadataDir is the base path for persisting engine frontend records.
+	// If empty, persistence is disabled.
+	metadataDir string
+
 	log *safelog.SafeLogger
 }
 
@@ -224,6 +228,12 @@ func (ef *EngineFrontend) Create(spdkClient *spdkclient.Client, targetAddress st
 				requireUpdate = true
 			}
 			ef.log.Info("Created engine frontend")
+
+			// Persist record AFTER successful creation.
+			if err := saveEngineFrontendRecord(ef.metadataDir, ef); err != nil {
+				ef.log.WithError(err).Warn("Failed to persist engine frontend record")
+			}
+
 			ret = ef.getWithoutLock()
 		}
 		ef.Unlock()
@@ -324,6 +334,11 @@ func (ef *EngineFrontend) Delete(spdkClient *spdkclient.Client) (err error) {
 	}
 
 	ef.log.Info("Deleted engine frontend")
+
+	// Remove persisted record AFTER successful deletion.
+	if err := removeEngineFrontendRecord(ef.metadataDir, ef.VolumeName); err != nil {
+		ef.log.WithError(err).Warn("Failed to remove engine frontend record")
+	}
 
 	return nil
 }
@@ -991,6 +1006,12 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 			"targetIP":      targetIP,
 			"targetPort":    targetPort,
 		}).Info("Switched over engine frontend target")
+
+		// Persist updated record AFTER successful switchover.
+		if err := saveEngineFrontendRecord(ef.metadataDir, ef); err != nil {
+			ef.log.WithError(err).Warn("Failed to persist engine frontend record after switchover")
+		}
+
 		return nil
 
 	case types.FrontendSPDKTCPBlockdev:
@@ -1082,6 +1103,12 @@ func (ef *EngineFrontend) SwitchOverTarget(spdkClient *spdkclient.Client, newEng
 			"targetIP":      targetIP,
 			"targetPort":    targetPort,
 		}).Info("Switched over engine frontend target")
+
+		// Persist updated record AFTER successful switchover.
+		if err := saveEngineFrontendRecord(ef.metadataDir, ef); err != nil {
+			ef.log.WithError(err).Warn("Failed to persist engine frontend record after switchover")
+		}
+
 		return nil
 
 	default:
@@ -1636,4 +1663,109 @@ func (ef *EngineFrontend) validateAndUpdateNvmeTcpFrontend() (err error) {
 	}
 
 	return nil
+}
+
+// RecoverFromHost attempts to recover the engine frontend's initiator state by
+// detecting existing NVMe controllers and dm-devices on the host. This is called
+// during server startup for engine frontends that were persisted before restart.
+//
+// On success, the frontend transitions to Running state.
+// On failure, it transitions to Error state so that the upper-layer controller
+// can reconcile (e.g. by calling Delete + Create).
+func (ef *EngineFrontend) RecoverFromHost(spdkClient *spdkclient.Client) error {
+	ef.Lock()
+	if ef.State != types.InstanceStatePending {
+		ef.Unlock()
+		return fmt.Errorf("invalid state %s for engine frontend %s recovery", ef.State, ef.Name)
+	}
+	ef.Unlock()
+
+	var recoverErr error
+
+	defer func() {
+		ef.Lock()
+		defer ef.Unlock()
+
+		if recoverErr != nil {
+			ef.log.WithError(recoverErr).Errorf("Failed to recover engine frontend %s from host", ef.Name)
+			ef.State = types.InstanceStateError
+			ef.ErrorMsg = recoverErr.Error()
+		} else {
+			ef.State = types.InstanceStateRunning
+			ef.ErrorMsg = ""
+			ef.log.Info("Successfully recovered engine frontend from host")
+		}
+		ef.UpdateCh <- nil
+	}()
+
+	switch ef.Frontend {
+	case types.FrontendEmpty:
+		// No initiator to recover for empty frontend.
+		return nil
+
+	case types.FrontendSPDKTCPNvmf:
+		// For NVMe-oF (non-blockdev) frontend, there is no local initiator.
+		// Just reconstruct the endpoint.
+		nqn := helpertypes.GetNQN(ef.EngineName)
+		nguid := generateNGUID(ef.EngineName)
+
+		ef.Lock()
+		ef.NvmeTcpFrontend.Nqn = nqn
+		ef.NvmeTcpFrontend.Nguid = nguid
+		// TargetIP and TargetPort are not recoverable without the Engine's subsystem info.
+		// Set them from the persisted EngineIP and leave port as 0 to be updated by ValidateAndUpdate.
+		ef.NvmeTcpFrontend.TargetIP = ef.EngineIP
+		ef.Unlock()
+
+		return nil
+
+	case types.FrontendSPDKTCPBlockdev:
+		// Recover the NVMe-oF initiator (blockdev frontend with dm-device).
+		i, nqn, nguid, err := ef.newNvmeTcpInitiator()
+		if err != nil {
+			recoverErr = errors.Wrapf(err, "failed to create NVMe/TCP initiator for recovery of engine frontend %s", ef.Name)
+			return recoverErr
+		}
+
+		ef.Lock()
+		ef.NvmeTcpFrontend.Nqn = nqn
+		ef.NvmeTcpFrontend.Nguid = nguid
+		ef.NvmeTcpFrontend.TargetIP = ef.EngineIP
+		ef.Unlock()
+
+		// Try to load the existing NVMe device info from sysfs.
+		// Use empty transport address/port since we want to discover by NQN.
+		if err := i.LoadNVMeDeviceInfo("", "", nqn); err != nil {
+			recoverErr = errors.Wrapf(err, "failed to load NVMe device info during recovery of engine frontend %s", ef.Name)
+			return recoverErr
+		}
+
+		// Try to load the existing dm-device endpoint.
+		if err := i.LoadEndpointForNvmeTcpFrontend(false); err != nil {
+			recoverErr = errors.Wrapf(err, "failed to load endpoint during recovery of engine frontend %s", ef.Name)
+			return recoverErr
+		}
+
+		ef.Lock()
+		ef.initiator = i
+		ef.Endpoint = i.GetEndpoint()
+		// Recover target port from the detected transport service ID.
+		if transportServiceID := i.GetTransportServiceID(); transportServiceID != "" {
+			if port, parseErr := strconv.Atoi(transportServiceID); parseErr == nil {
+				ef.NvmeTcpFrontend.TargetPort = int32(port)
+			}
+		}
+		// Recover target IP from the detected transport address.
+		if transportAddress := i.GetTransportAddress(); transportAddress != "" {
+			ef.NvmeTcpFrontend.TargetIP = transportAddress
+			ef.EngineIP = transportAddress
+		}
+		ef.Unlock()
+
+		return nil
+
+	default:
+		recoverErr = fmt.Errorf("unsupported frontend type %s for recovery of engine frontend %s", ef.Frontend, ef.Name)
+		return recoverErr
+	}
 }

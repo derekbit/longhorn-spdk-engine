@@ -70,6 +70,10 @@ type Server struct {
 
 	currentBdevIostat *spdktypes.BdevIostatResponse
 	bdevMetricMap     map[string]*spdkrpc.Metrics
+
+	// metadataDir is the base path for persisting engine frontend records
+	// (e.g. /var/lib/longhorn). If empty, persistence is disabled.
+	metadataDir string
 }
 
 func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
@@ -122,6 +126,8 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 		broadcasters: broadcasters,
 		broadcastChs: broadcastChs,
 		updateChs:    updateChs,
+
+		metadataDir: types.MetadataDir,
 	}
 	s.hotplugActive.Store(true)
 
@@ -137,6 +143,8 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 	if _, err := s.broadcasters[types.InstanceTypeBackingImage].Subscribe(ctx, s.backingImageBroadcastConnector); err != nil {
 		return nil, err
 	}
+
+	s.recoverEngineFrontends()
 
 	// TODO: There is no need to maintain the replica map in cache when we can use one SPDK JSON API call to fetch the Lvol tree/chain info
 	go s.monitoring()
@@ -2653,6 +2661,7 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 
 	ef := NewEngineFrontend(req.Name, req.EngineName, req.VolumeName, req.Frontend, req.SpecSize,
 		req.UblkQueueDepth, req.UblkNumberOfQueue, s.updateChs[types.InstanceTypeEngineFrontend])
+	ef.metadataDir = s.metadataDir
 	s.engineFrontendMap[req.Name] = ef
 
 	spdkClient := s.spdkClient
@@ -2893,4 +2902,61 @@ func (s *Server) GetReplicaStruct(name string) *Replica {
 	s.RLock()
 	defer s.RUnlock()
 	return s.replicaMap[name]
+}
+
+// recoverEngineFrontends loads persisted engine frontend records from disk
+// and attempts to recover them by detecting existing NVMe initiators on the host.
+// This is called during server startup to restore state after instance-manager restart.
+func (s *Server) recoverEngineFrontends() {
+	if s.metadataDir == "" {
+		return
+	}
+
+	records, err := loadEngineFrontendRecords(s.metadataDir)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to load engine frontend records for recovery")
+		return
+	}
+
+	if len(records) == 0 {
+		return
+	}
+
+	logrus.Infof("Recovering %d engine frontend(s) from persisted records", len(records))
+
+	s.Lock()
+	spdkClient := s.spdkClient
+	for _, record := range records {
+		if _, exists := s.engineFrontendMap[record.Name]; exists {
+			logrus.Infof("Engine frontend %s already exists in map, skipping recovery", record.Name)
+			continue
+		}
+
+		ef := NewEngineFrontend(record.Name, record.EngineName, record.VolumeName,
+			record.Frontend, record.SpecSize, 0, 0, s.updateChs[types.InstanceTypeEngineFrontend])
+		ef.EngineIP = record.EngineIP
+		ef.metadataDir = s.metadataDir
+
+		s.engineFrontendMap[record.Name] = ef
+
+		logrus.Infof("Recovered engine frontend %s for volume %s from persisted record", record.Name, record.VolumeName)
+	}
+	s.Unlock()
+
+	// Attempt to recover each frontend's initiator state from the host.
+	// This is done outside the server lock to avoid holding it during potentially
+	// slow NVMe device discovery operations.
+	for _, record := range records {
+		s.RLock()
+		ef := s.engineFrontendMap[record.Name]
+		s.RUnlock()
+
+		if ef == nil {
+			continue
+		}
+
+		if err := ef.RecoverFromHost(spdkClient); err != nil {
+			logrus.WithError(err).Warnf("Failed to recover engine frontend %s from host, setting error state", record.Name)
+		}
+	}
 }
