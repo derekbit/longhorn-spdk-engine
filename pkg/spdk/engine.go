@@ -515,17 +515,20 @@ func (e *Engine) Get() (res *spdkrpc.Engine) {
 
 func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
 	res = &spdkrpc.Engine{
-		Name:              e.Name,
-		VolumeName:        e.VolumeName,
-		SpecSize:          e.SpecSize,
-		ActualSize:        e.ActualSize,
-		ReplicaAddressMap: map[string]string{},
-		ReplicaModeMap:    map[string]spdkrpc.ReplicaMode{},
-		Snapshots:         map[string]*spdkrpc.Lvol{},
-		Frontend:          e.Frontend,
-		Endpoint:          e.Endpoint,
-		State:             string(e.State),
-		ErrorMsg:          e.ErrorMsg,
+		Name:                  e.Name,
+		VolumeName:            e.VolumeName,
+		SpecSize:              e.SpecSize,
+		ActualSize:            e.ActualSize,
+		ReplicaAddressMap:     map[string]string{},
+		ReplicaModeMap:        map[string]spdkrpc.ReplicaMode{},
+		Snapshots:             map[string]*spdkrpc.Lvol{},
+		Frontend:              e.Frontend,
+		Endpoint:              e.Endpoint,
+		State:                 string(e.State),
+		ErrorMsg:              e.ErrorMsg,
+		IsExpanding:           e.isExpanding,
+		LastExpansionError:    e.lastExpansionError,
+		LastExpansionFailedAt: e.lastExpansionFailedAt,
 	}
 
 	if e.NvmeTcpTarget != nil {
@@ -2242,6 +2245,12 @@ func (e *Engine) Expand(spdkClient *spdkclient.Client, size uint64) (err error) 
 		return err
 	}
 	if !requireExpansion {
+		// Clear stale expansion error from a previous partial failure,
+		// since there is nothing left to expand.
+		e.Lock()
+		e.lastExpansionError = ""
+		e.lastExpansionFailedAt = ""
+		e.Unlock()
 		return nil
 	}
 
@@ -2335,12 +2344,17 @@ func (e *Engine) finishExpansion(fromSize, toSize uint64, err error) {
 
 	e.State = types.InstanceStateRunning
 	e.ErrorMsg = ""
-	e.SpecSize = toSize
 	if e.lastExpansionError != "" {
-		e.log.Infof("Succeeded to expand from size %v to %v but there are some replica expansion failures: %v", fromSize, toSize, e.lastExpansionError)
-	} else {
-		e.log.Infof("Succeeded to expand from size %v to %v", fromSize, toSize)
+		if e.lastExpansionFailedAt == "" {
+			e.lastExpansionFailedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		e.log.Warnf("Partially failed to expand from size %v to %v; keeping engine size at %v: %v",
+			fromSize, toSize, fromSize, e.lastExpansionError)
+		return
 	}
+
+	e.SpecSize = toSize
+	e.log.Infof("Succeeded to expand from size %v to %v", fromSize, toSize)
 }
 
 func (e *Engine) tearDownRaidBdev(spdkClient *spdkclient.Client) (bdevUUID string, err error) {

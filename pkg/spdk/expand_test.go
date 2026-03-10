@@ -58,7 +58,7 @@ func (s *TestSuite) TestEngineFrontendFinishExpansionSuccessClearsErrorState(c *
 	ef.ErrorMsg = "previous failure"
 	ef.lastExpansionError = ""
 
-	ef.finishExpansion(10, true, 20, nil)
+	ef.finishExpansion(10, true, 20, nil, "", "")
 
 	c.Assert(ef.State, Equals, lhtypes.InstanceState(lhtypes.InstanceStateRunning))
 	c.Assert(ef.ErrorMsg, Equals, "")
@@ -71,7 +71,7 @@ func (s *TestSuite) TestEngineFrontendFinishExpansionExpandedWithError(c *C) {
 
 	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 10, 0, 0, make(chan interface{}, 1))
 
-	ef.finishExpansion(10, true, 20, errors.New("post expansion frontend failure"))
+	ef.finishExpansion(10, true, 20, errors.New("post expansion frontend failure"), "", "")
 
 	c.Assert(ef.State, Equals, lhtypes.InstanceState(lhtypes.InstanceStateError))
 	c.Assert(ef.ErrorMsg, Not(Equals), "")
@@ -86,11 +86,40 @@ func (s *TestSuite) TestEngineFrontendFinishExpansionFailureWithoutExpansion(c *
 	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 10, 0, 0, make(chan interface{}, 1))
 	ef.SpecSize = 10
 
-	ef.finishExpansion(10, false, 20, errors.New("expand failed before backend expansion"))
+	ef.finishExpansion(10, false, 20, errors.New("expand failed before backend expansion"), "", "")
 
 	c.Assert(ef.State, Equals, lhtypes.InstanceState(lhtypes.InstanceStateError))
 	c.Assert(ef.SpecSize, Equals, uint64(10))
 	c.Assert(ef.lastExpansionError, Not(Equals), "")
+	c.Assert(ef.isExpanding, Equals, false)
+}
+
+func (s *TestSuite) TestEngineFinishExpansionPartialFailureKeepsOriginalSize(c *C) {
+	fmt.Println("Testing Engine finish expansion partial failure keeps original size")
+
+	e := NewEngine("engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 10, make(chan interface{}, 1))
+	e.lastExpansionError = "replica expand failed"
+
+	e.finishExpansion(10, 20, nil)
+
+	c.Assert(e.State, Equals, lhtypes.InstanceState(lhtypes.InstanceStateRunning))
+	c.Assert(e.ErrorMsg, Equals, "")
+	c.Assert(e.SpecSize, Equals, uint64(10))
+	c.Assert(e.lastExpansionFailedAt, Not(Equals), "")
+}
+
+func (s *TestSuite) TestEngineFrontendFinishExpansionPartialFailureKeepsOriginalSize(c *C) {
+	fmt.Println("Testing EngineFrontend finish expansion partial failure keeps original size")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 10, 0, 0, make(chan interface{}, 1))
+
+	ef.finishExpansion(10, false, 20, nil, "replica expand failed", "2026-03-10T00:00:00Z")
+
+	c.Assert(ef.State, Equals, lhtypes.InstanceState(lhtypes.InstanceStateRunning))
+	c.Assert(ef.ErrorMsg, Equals, "")
+	c.Assert(ef.SpecSize, Equals, uint64(10))
+	c.Assert(ef.lastExpansionError, Equals, "replica expand failed")
+	c.Assert(ef.lastExpansionFailedAt, Equals, "2026-03-10T00:00:00Z")
 	c.Assert(ef.isExpanding, Equals, false)
 }
 
