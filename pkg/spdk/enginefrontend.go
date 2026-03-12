@@ -1727,11 +1727,16 @@ func (ef *EngineFrontend) RecoverFromHost(spdkClient *spdkclient.Client) error {
 	ef.Unlock()
 
 	var recoverErr error
+	var deviceNotFound bool
 
 	defer func() {
 		ef.Lock()
 		defer ef.Unlock()
 
+		if deviceNotFound {
+			// Device not found on host — record already removed, nothing to reconcile.
+			return
+		}
 		if recoverErr != nil {
 			ef.log.WithError(recoverErr).Errorf("Failed to recover engine frontend %s from host", ef.Name)
 			ef.State = types.InstanceStateError
@@ -1782,6 +1787,14 @@ func (ef *EngineFrontend) RecoverFromHost(spdkClient *spdkclient.Client) error {
 		// Try to load the existing NVMe device info from sysfs.
 		// Use empty transport address/port since we want to discover by NQN.
 		if err := i.LoadNVMeDeviceInfo("", "", nqn); err != nil {
+			if strings.Contains(err.Error(), helpertypes.ErrorMessageCannotFindValidNvmeDevice) {
+				ef.log.WithError(err).Warnf("NVMe device not found on host during recovery of engine frontend %s, removing persisted record", ef.Name)
+				if removeErr := removeEngineFrontendRecord(ef.metadataDir, ef.VolumeName); removeErr != nil {
+					ef.log.WithError(removeErr).Warn("Failed to remove engine frontend record")
+				}
+				deviceNotFound = true
+				return ErrRecoverDeviceNotFound
+			}
 			recoverErr = errors.Wrapf(err, "failed to load NVMe device info during recovery of engine frontend %s", ef.Name)
 			return recoverErr
 		}

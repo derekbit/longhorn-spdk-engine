@@ -2956,6 +2956,13 @@ func (s *Server) recoverEngineFrontends() {
 		}
 
 		if err := ef.RecoverFromHost(spdkClient); err != nil {
+			if errors.Is(err, ErrRecoverDeviceNotFound) {
+				s.Lock()
+				delete(s.engineFrontendMap, record.Name)
+				s.Unlock()
+				logrus.Warnf("Removed engine frontend %s from map: device not found on host", record.Name)
+				continue
+			}
 			logrus.WithError(err).Warnf("Failed to recover engine frontend %s from host, setting error state", record.Name)
 		}
 	}
