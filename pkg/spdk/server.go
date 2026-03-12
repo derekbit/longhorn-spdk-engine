@@ -144,11 +144,14 @@ func NewServer(ctx context.Context, portStart, portEnd int32) (*Server, error) {
 		return nil, err
 	}
 
+	// Start broadcasting before recovery so that UpdateCh sends inside
+	// RecoverFromHost do not block on the unbuffered channel.
+	go s.broadcasting()
+
 	s.recoverEngineFrontends()
 
 	// TODO: There is no need to maintain the replica map in cache when we can use one SPDK JSON API call to fetch the Lvol tree/chain info
 	go s.monitoring()
-	go s.broadcasting()
 
 	return s, nil
 }
