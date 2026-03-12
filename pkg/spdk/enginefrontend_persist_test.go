@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	lhtypes "github.com/longhorn/longhorn-spdk-engine/pkg/types"
-
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
+
+	lhtypes "github.com/longhorn/longhorn-spdk-engine/pkg/types"
 
 	. "gopkg.in/check.v1"
 )
@@ -236,7 +236,7 @@ func (s *TestSuite) TestLoadRecordsBackwardCompatibleWithOldFormat(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(len(records), Equals, 1)
 	c.Assert(records[0].Name, Equals, "ef-old")
-	c.Assert(records[0].TargetIP, Equals, "")   // Not present in old format.
+	c.Assert(records[0].TargetIP, Equals, "")         // Not present in old format.
 	c.Assert(records[0].TargetPort, Equals, int32(0)) // Not present in old format.
 }
 
