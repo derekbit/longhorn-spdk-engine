@@ -1756,16 +1756,19 @@ func (ef *EngineFrontend) RecoverFromHost(spdkClient *spdkclient.Client) error {
 
 	case types.FrontendSPDKTCPNvmf:
 		// For NVMe-oF (non-blockdev) frontend, there is no local initiator.
-		// Just reconstruct the endpoint.
+		// Just reconstruct the endpoint from persisted TargetPort and EngineIP.
 		nqn := helpertypes.GetNQN(ef.EngineName)
 		nguid := generateNGUID(ef.EngineName)
 
 		ef.Lock()
 		ef.NvmeTcpFrontend.Nqn = nqn
 		ef.NvmeTcpFrontend.Nguid = nguid
-		// TargetIP and TargetPort are not recoverable without the Engine's subsystem info.
-		// Set them from the persisted EngineIP and leave port as 0 to be updated by ValidateAndUpdate.
-		ef.NvmeTcpFrontend.TargetIP = ef.EngineIP
+		if ef.NvmeTcpFrontend.TargetIP == "" {
+			ef.NvmeTcpFrontend.TargetIP = ef.EngineIP
+		}
+		if ef.NvmeTcpFrontend.TargetPort != 0 {
+			ef.Endpoint = GetNvmfEndpoint(nqn, ef.NvmeTcpFrontend.TargetIP, ef.NvmeTcpFrontend.TargetPort)
+		}
 		ef.Unlock()
 
 		return nil

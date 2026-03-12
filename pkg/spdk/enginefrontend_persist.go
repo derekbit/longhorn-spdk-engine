@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/longhorn/longhorn-spdk-engine/pkg/types"
 )
 
 const (
@@ -23,7 +26,8 @@ type EngineFrontendRecord struct {
 	VolumeName string `json:"volumeName"`
 	Frontend   string `json:"frontend"`
 	SpecSize   uint64 `json:"specSize"`
-	EngineIP   string `json:"engineIP"`
+	TargetIP   string `json:"targetIP"`
+	TargetPort int32  `json:"targetPort"`
 }
 
 // engineFrontendRecordDir returns the directory path for a volume's record.
@@ -43,13 +47,26 @@ func saveEngineFrontendRecord(metadataDir string, ef *EngineFrontend) error {
 		return nil
 	}
 
+	// UBLK frontends cannot be recovered after restart, so skip persistence.
+	if types.IsUblkFrontend(ef.Frontend) {
+		return nil
+	}
+
+	var targetIP string
+	var targetPort int32
+	if ef.NvmeTcpFrontend != nil {
+		targetIP = ef.NvmeTcpFrontend.TargetIP
+		targetPort = ef.NvmeTcpFrontend.TargetPort
+	}
+
 	record := &EngineFrontendRecord{
 		Name:       ef.Name,
 		EngineName: ef.EngineName,
 		VolumeName: ef.VolumeName,
 		Frontend:   ef.Frontend,
 		SpecSize:   ef.SpecSize,
-		EngineIP:   ef.EngineIP,
+		TargetIP:   targetIP,
+		TargetPort: targetPort,
 	}
 
 	dir := engineFrontendRecordDir(metadataDir, ef.VolumeName)
@@ -105,12 +122,21 @@ func loadEngineFrontendRecords(metadataDir string) ([]*EngineFrontendRecord, err
 
 	baseDir := filepath.Join(metadataDir, engineFrontendSubDir)
 
-	entries, err := os.ReadDir(baseDir)
-	if err != nil {
-		if os.IsNotExist(err) {
+	var entries []os.DirEntry
+	var readErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		entries, readErr = os.ReadDir(baseDir)
+		if readErr == nil {
+			break
+		}
+		if os.IsNotExist(readErr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to read engine frontend records directory %s: %w", baseDir, err)
+		logrus.WithError(readErr).Warnf("Failed to read engine frontend records directory %s (attempt %d/3)", baseDir, attempt+1)
+		time.Sleep(500 * time.Millisecond)
+	}
+	if readErr != nil {
+		return nil, fmt.Errorf("failed to read engine frontend records directory %s after retries: %w", baseDir, readErr)
 	}
 
 	var records []*EngineFrontendRecord
@@ -134,12 +160,18 @@ func loadEngineFrontendRecords(metadataDir string) ([]*EngineFrontendRecord, err
 
 		record := &EngineFrontendRecord{}
 		if err := json.Unmarshal(data, record); err != nil {
-			logrus.WithError(err).Warnf("Failed to parse engine frontend record %s, skipping", recordPath)
+			logrus.WithError(err).Warnf("Failed to parse engine frontend record %s, removing corrupted record", recordPath)
+			if removeErr := os.RemoveAll(filepath.Join(baseDir, volumeName)); removeErr != nil {
+				logrus.WithError(removeErr).Warnf("Failed to remove corrupted engine frontend record directory %s", volumeName)
+			}
 			continue
 		}
 
 		if record.Name == "" || record.VolumeName == "" {
-			logrus.Warnf("Engine frontend record %s has empty name or volume name, skipping", recordPath)
+			logrus.Warnf("Engine frontend record %s has empty name or volume name, removing invalid record", recordPath)
+			if removeErr := os.RemoveAll(filepath.Join(baseDir, volumeName)); removeErr != nil {
+				logrus.WithError(removeErr).Warnf("Failed to remove invalid engine frontend record directory %s", volumeName)
+			}
 			continue
 		}
 
