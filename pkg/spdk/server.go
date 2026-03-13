@@ -488,12 +488,21 @@ func (s *Server) syncVerifiedObjects(state *verifyState) error {
 }
 
 func (s *Server) broadcasting() {
-	done := false
 	for {
 		select {
 		case <-s.ctx.Done():
 			logrus.Info("spdk gRPC server: stopped broadcasting instances due to the context done")
-			done = true
+			// Keep draining updateChs so that senders on unbuffered channels
+			// do not block forever after broadcasting stops forwarding.
+			// Other goroutines will eventually observe ctx.Done() and stop sending.
+			for {
+				select {
+				case <-s.updateChs[types.InstanceTypeReplica]:
+				case <-s.updateChs[types.InstanceTypeEngine]:
+				case <-s.updateChs[types.InstanceTypeEngineFrontend]:
+				case <-s.updateChs[types.InstanceTypeBackingImage]:
+				}
+			}
 		case <-s.updateChs[types.InstanceTypeReplica]:
 			s.broadcastChs[types.InstanceTypeReplica] <- nil
 		case <-s.updateChs[types.InstanceTypeEngine]:
@@ -502,9 +511,6 @@ func (s *Server) broadcasting() {
 			s.broadcastChs[types.InstanceTypeEngineFrontend] <- nil
 		case <-s.updateChs[types.InstanceTypeBackingImage]:
 			s.broadcastChs[types.InstanceTypeBackingImage] <- nil
-		}
-		if done {
-			break
 		}
 	}
 }
@@ -676,13 +682,14 @@ func (s *Server) ReplicaGet(ctx context.Context, req *spdkrpc.ReplicaGetRequest)
 func (s *Server) ReplicaExpand(ctx context.Context, req *spdkrpc.ReplicaExpandRequest) (ret *emptypb.Empty, err error) {
 	s.RLock()
 	r := s.replicaMap[req.Name]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if r == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find replica %v", req.Name)
 	}
 
-	if err := r.Expand(s.spdkClient, req.Size); err != nil {
+	if err := r.Expand(spdkClient, req.Size); err != nil {
 		return nil, err
 	}
 
@@ -1352,6 +1359,7 @@ func (s *Server) EngineExpand(ctx context.Context, req *spdkrpc.EngineExpandRequ
 
 	s.RLock()
 	e := s.engineMap[req.Name]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if e == nil {
@@ -1362,7 +1370,7 @@ func (s *Server) EngineExpand(ctx context.Context, req *spdkrpc.EngineExpandRequ
 		return nil, grpcstatus.Errorf(grpccodes.Unimplemented, "cannot expand ublk frontend engine %v", req.Name)
 	}
 
-	err = e.Expand(s.spdkClient, req.Size)
+	err = e.Expand(spdkClient, req.Size)
 	if err != nil {
 		return nil, toExpansionGRPCError(err, "failed to expand engine %v", req.Name)
 	}
@@ -1379,13 +1387,14 @@ func (s *Server) EngineExpandPrecheck(ctx context.Context, req *spdkrpc.EngineEx
 
 	s.RLock()
 	e := s.engineMap[req.Name]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if e == nil {
 		return &spdkrpc.EngineExpandPrecheckResponse{}, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for expansion", req.Name)
 	}
 
-	requireExpansion, err := e.ExpandPrecheck(s.spdkClient, req.Size)
+	requireExpansion, err := e.ExpandPrecheck(spdkClient, req.Size)
 	if err != nil {
 		return &spdkrpc.EngineExpandPrecheckResponse{
 			ExpansionRequired: false,
@@ -1471,13 +1480,14 @@ func (s *Server) EngineFrontendSuspend(ctx context.Context, req *spdkrpc.EngineF
 
 	s.RLock()
 	ef := s.engineFrontendMap[req.Name]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if ef == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for suspension", req.Name)
 	}
 
-	err = ef.Suspend(s.spdkClient)
+	err = ef.Suspend(spdkClient)
 	if err != nil {
 		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to suspend engine frontend %v", req.Name).Error())
 	}
@@ -1492,13 +1502,14 @@ func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFr
 
 	s.RLock()
 	ef := s.engineFrontendMap[req.Name]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if ef == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend %v for resumption", req.Name)
 	}
 
-	err = ef.Resume(s.spdkClient)
+	err = ef.Resume(spdkClient)
 	if err != nil {
 		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to resume engine frontend %v", req.Name).Error())
 	}
@@ -1703,13 +1714,14 @@ func (s *Server) EngineFrontendReplicaAdd(ctx context.Context, req *spdkrpc.Engi
 func (s *Server) EngineReplicaList(ctx context.Context, req *spdkrpc.EngineReplicaListRequest) (ret *spdkrpc.EngineReplicaListResponse, err error) {
 	s.RLock()
 	e := s.engineMap[req.EngineName]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if e == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica list", req.EngineName)
 	}
 
-	replicas, err := e.ReplicaList(s.spdkClient)
+	replicas, err := e.ReplicaList(spdkClient)
 	if err != nil {
 		return nil, err
 	}
@@ -2028,25 +2040,27 @@ func (s *Server) EngineBackupRestore(ctx context.Context, req *spdkrpc.EngineBac
 
 	s.RLock()
 	e := s.engineMap[req.EngineName]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if e == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for restoring backup", req.EngineName)
 	}
 
-	return e.BackupRestore(s.spdkClient, req.BackupUrl, req.EngineName, req.SnapshotName, req.Credential, req.ConcurrentLimit)
+	return e.BackupRestore(spdkClient, req.BackupUrl, req.EngineName, req.SnapshotName, req.Credential, req.ConcurrentLimit)
 }
 
 func (s *Server) ReplicaBackupRestore(ctx context.Context, req *spdkrpc.ReplicaBackupRestoreRequest) (ret *emptypb.Empty, err error) {
 	s.RLock()
 	replica := s.replicaMap[req.ReplicaName]
-	defer s.RUnlock()
+	spdkClient := s.spdkClient
+	s.RUnlock()
 
 	if replica == nil {
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find replica %v for restoring backup %v", req.ReplicaName, req.BackupUrl)
 	}
 
-	err = replica.BackupRestore(s.spdkClient, req.BackupUrl, req.SnapshotName, req.Credential, req.ConcurrentLimit)
+	err = replica.BackupRestore(spdkClient, req.BackupUrl, req.SnapshotName, req.Credential, req.ConcurrentLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -2081,9 +2095,8 @@ func (s *Server) ReplicaRestoreStatus(ctx context.Context, req *spdkrpc.ReplicaR
 
 	if replica.restore == nil {
 		return &spdkrpc.ReplicaRestoreStatusResponse{
-			ReplicaName:    replica.Name,
-			ReplicaAddress: net.JoinHostPort(replica.restore.ip, strconv.Itoa(int(replica.restore.port))),
-			IsRestoring:    false,
+			ReplicaName: replica.Name,
+			IsRestoring: false,
 		}, nil
 	}
 
@@ -2151,31 +2164,7 @@ func (s *Server) DiskCreate(ctx context.Context, req *spdkrpc.DiskCreateRequest)
 			return
 		}
 
-		logrus.Infof("Disk %v is created, start scanning", req.DiskName)
-
-		timer := time.NewTimer(3 * time.Minute)
-		defer timer.Stop()
-		ticker := time.NewTicker(MonitorInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-s.ctx.Done():
-				logrus.Infof("SPDK gRPC server: context done before scanning disk %s(%s) path %s",
-					req.DiskName, req.DiskUuid, req.DiskPath)
-				return
-			case <-timer.C:
-				logrus.Infof("SPDK gRPC server: timeout (3m) scanning disk %s(%s) path %s",
-					req.DiskName, req.DiskUuid, req.DiskPath)
-				return
-			case <-ticker.C:
-				if err := s.verify(); err == nil {
-					logrus.Infof("SPDK gRPC server: successfully scanned disk %s(%s) path %s",
-						req.DiskName, req.DiskUuid, req.DiskPath)
-					return
-				}
-			}
-		}
+		logrus.Infof("Disk %v is created, replicas will be discovered by the next monitoring cycle", req.DiskName)
 	}(disk, req)
 
 	return &spdkrpc.Disk{
@@ -2356,14 +2345,20 @@ func (s *Server) BackingImageCreate(ctx context.Context, req *spdkrpc.BackingIma
 
 	// Don't recreate the backing image
 	backingImageSnapLvolName := GetBackingImageSnapLvolName(req.Name, req.LvsUuid)
-	if bi, ok := s.backingImageMap[backingImageSnapLvolName]; ok {
+
+	s.RLock()
+	bi := s.backingImageMap[backingImageSnapLvolName]
+	spdkClient := s.spdkClient
+	s.RUnlock()
+
+	if bi != nil {
 		if bi.BackingImageUUID == req.BackingImageUuid {
 			return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "backing image %v already exists", req.Name)
 		}
 
 		logrus.Infof("Found backing image exists with different backing image UUID %v, deleting it", bi.BackingImageUUID)
 
-		if err := bi.Delete(s.spdkClient, s.portAllocator); err != nil {
+		if err := bi.Delete(spdkClient, s.portAllocator); err != nil {
 			return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to delete backing image %v in lvs %v with different UUID", req.Name, req.LvsUuid).Error())
 		}
 
@@ -2372,16 +2367,16 @@ func (s *Server) BackingImageCreate(ctx context.Context, req *spdkrpc.BackingIma
 		s.Unlock()
 	}
 
-	bi, err := s.newBackingImage(req)
+	newBI, err := s.newBackingImage(req)
 	if err != nil {
 		return nil, err
 	}
 
 	s.RLock()
-	spdkClient := s.spdkClient
+	spdkClient = s.spdkClient
 	s.RUnlock()
 
-	return bi.Create(spdkClient, s.portAllocator, req.FromAddress, req.SrcLvsUuid)
+	return newBI.Create(spdkClient, s.portAllocator, req.FromAddress, req.SrcLvsUuid)
 }
 
 func (s *Server) BackingImageDelete(ctx context.Context, req *spdkrpc.BackingImageDeleteRequest) (ret *emptypb.Empty, err error) {
@@ -2426,17 +2421,18 @@ func (s *Server) BackingImageGet(ctx context.Context, req *spdkrpc.BackingImageG
 
 	s.RLock()
 	bi := s.backingImageMap[backingImageSnapLvolName]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if bi == nil {
-		lvsName, err := GetLvsNameByUUID(s.spdkClient, req.LvsUuid)
+		lvsName, err := GetLvsNameByUUID(spdkClient, req.LvsUuid)
 		if err != nil {
 			return nil, grpcstatus.Errorf(grpccodes.NotFound, "failed to get the lvs name with lvs uuid %v", req.LvsUuid)
 		}
 
 		if lvsName != "" {
 			backingImageSnapLvolAlias := spdktypes.GetLvolAlias(lvsName, backingImageSnapLvolName)
-			bdevLvolList, err := s.spdkClient.BdevLvolGet(backingImageSnapLvolAlias, 0)
+			bdevLvolList, err := spdkClient.BdevLvolGet(backingImageSnapLvolAlias, 0)
 			if err != nil {
 				return nil, grpcstatus.Errorf(grpccodes.NotFound, "got error %v when getting lvol %v in the lvs %v", err, req.Name, req.LvsUuid)
 			}
@@ -2774,6 +2770,7 @@ func (s *Server) EngineFrontendExpand(ctx context.Context, req *spdkrpc.EngineFr
 
 	s.RLock()
 	ef := s.engineFrontendMap[req.Name]
+	spdkClient := s.spdkClient
 	s.RUnlock()
 
 	if ef == nil {
@@ -2784,7 +2781,7 @@ func (s *Server) EngineFrontendExpand(ctx context.Context, req *spdkrpc.EngineFr
 		return nil, grpcstatus.Errorf(grpccodes.Unimplemented, "cannot expand ublk frontend engine %v", ef.Name)
 	}
 
-	err = ef.Expand(ctx, s.spdkClient, req.Size)
+	err = ef.Expand(ctx, spdkClient, req.Size)
 	if err != nil {
 		return nil, toExpansionGRPCError(err, "failed to expand engine frontend %v", req.Name)
 	}

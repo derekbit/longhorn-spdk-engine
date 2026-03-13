@@ -510,6 +510,7 @@ func (ef *EngineFrontend) SetErrorState() {
 	}()
 
 	if ef.State != types.InstanceStateStopped && ef.State != types.InstanceStateError {
+		ef.log.Error("Setting engine frontend to error state")
 		ef.State = types.InstanceStateError
 		needUpdate = true
 	}
@@ -774,6 +775,7 @@ func (ef *EngineFrontend) requireExpansion(ctx context.Context, engineSpdkClient
 
 func (ef *EngineFrontend) finishExpansion(fromSize uint64, expanded bool, size uint64, err error, backendExpansionError, backendExpansionFailedAt string) {
 	if err != nil {
+		ef.log.WithError(err).Errorf("Engine %s failed to expand from size %v to %v", ef.Name, fromSize, size)
 		ef.State = types.InstanceStateError
 		ef.ErrorMsg = err.Error()
 		ef.lastExpansionError = errors.Wrap(err, "engine failed to expand expansion").Error()
@@ -1284,6 +1286,7 @@ func (ef *EngineFrontend) snapshotOperation(inputSnapshotName string, snapshotOp
 	defer func() {
 		if engineFrontendErr != nil {
 			if ef.State != types.InstanceStateError {
+				ef.log.Error("Setting engine frontend to error state due to snapshot operation failure")
 				ef.State = types.InstanceStateError
 				updateRequired = true
 			}
@@ -1394,9 +1397,7 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 		ef.Lock()
 		ef.isReplicaAdding = false
 		ef.Unlock()
-		wrappedErr := errors.Wrapf(err, "failed to get SPDK client for engine frontend %v replica add", engineName)
-		ef.setReplicaAddError(wrappedErr)
-		return wrappedErr
+		return errors.Wrapf(err, "failed to get SPDK client for engine frontend %v replica add", engineName)
 	}
 	defer func() {
 		if errClose := engineSpdkClient.Close(); errClose != nil {
@@ -1410,9 +1411,7 @@ func (ef *EngineFrontend) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaNa
 		ef.Lock()
 		ef.isReplicaAdding = false
 		ef.Unlock()
-		wrappedErr := errors.Wrapf(err, "failed to start replica add %s on engine %s", dstReplicaName, engineName)
-		ef.setReplicaAddError(wrappedErr)
-		return wrappedErr
+		return errors.Wrapf(err, "failed to start replica add %s on engine %s", dstReplicaName, engineName)
 	}
 
 	go ef.completeReplicaAdd(engineName, engineIP, dstReplicaName, dstReplicaAddress, fastSync)
@@ -1435,7 +1434,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 
 	engineSpdkClient, err := GetServiceClient(net.JoinHostPort(engineIP, strconv.Itoa(types.SPDKServicePort)))
 	if err != nil {
-		ef.setReplicaAddError(errors.Wrapf(err, "failed to get SPDK client for engine frontend %v replica %s add finish", engineName, dstReplicaName))
+		ef.log.WithError(err).Errorf("Failed to get SPDK client for engine frontend %v replica %s add finish", engineName, dstReplicaName)
 		return
 	}
 	defer func() {
@@ -1469,7 +1468,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after shallow copy failure", engineName, dstReplicaName)
 			err = multierr.Append(err, cleanupErr)
 		}
-		ef.setReplicaAddError(errors.Wrapf(err, "failed to shallow copy replica %s on engine %s", dstReplicaName, engineName))
+		ef.log.WithError(err).Errorf("Failed to shallow copy replica %s on engine %s", dstReplicaName, engineName)
 		return
 	}
 
@@ -1493,7 +1492,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after suspend failure", engineName, dstReplicaName)
 			err = multierr.Append(err, cleanupErr)
 		}
-		ef.setReplicaAddError(errors.Wrapf(err, "failed to suspend engine frontend %s before replica add finish", engineName))
+		ef.log.WithError(err).Errorf("Failed to suspend engine frontend %s before replica add finish", engineName)
 		return
 	}
 	if suspended {
@@ -1502,9 +1501,12 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 			if resumeErr := ef.resumeForReplicaAddFinish(); resumeErr != nil {
 				resumeErr = errors.Wrapf(resumeErr, "failed to resume engine frontend %s after replica add finish", engineName)
 				finishErr = multierr.Append(finishErr, resumeErr)
-			}
-			if finishErr != nil {
+				// Only mark frontend as error when resume fails — the frontend is stuck in suspended state
 				ef.setReplicaAddError(finishErr)
+			} else if finishErr != nil {
+				// Finish failed but resume succeeded — frontend is still functional,
+				// only log the error without marking frontend as error
+				ef.log.WithError(finishErr).Errorf("Replica add finish failed but engine frontend %s resumed successfully", engineName)
 			}
 		}()
 	}
@@ -1547,6 +1549,7 @@ func (ef *EngineFrontend) setReplicaAddError(err error) {
 	ef.Lock()
 	if err != nil {
 		if ef.State != types.InstanceStateError {
+			ef.log.WithError(err).Error("Setting engine frontend to error state due to replica add failure")
 			ef.State = types.InstanceStateError
 			requireUpdate = true
 		}
@@ -1570,6 +1573,7 @@ func (ef *EngineFrontend) ValidateAndUpdate(spdkClient *spdkclient.Client) (err 
 	defer func() {
 		if err != nil {
 			if ef.State != types.InstanceStateError {
+				ef.log.WithError(err).Error("Setting engine frontend to error state due to validation failure")
 				ef.State = types.InstanceStateError
 				updateRequired = true
 			}
