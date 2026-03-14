@@ -162,10 +162,8 @@ func NewEngineFrontend(engineFrontendName, engineName, volumeName, frontend stri
 }
 
 // Create creates the engine frontend. On failure, it sets the frontend state
-// to InstanceStateError with the error message, clears the returned error,
-// and returns the frontend in error state. This design allows the caller
-// (EngineFrontendCreate) to always register the frontend in the map and
-// let the controller reconcile the error state.
+// to InstanceStateError with the error message and returns the error so callers
+// can surface the attach failure instead of treating it as a successful start.
 func (ef *EngineFrontend) Create(spdkClient *spdkclient.Client, targetAddress string) (ret *spdkrpc.EngineFrontend, err error) {
 	ef.log.WithFields(logrus.Fields{
 		"targetAddress": targetAddress,
@@ -174,18 +172,20 @@ func (ef *EngineFrontend) Create(spdkClient *spdkclient.Client, targetAddress st
 
 	targetIP, _, err := splitHostPort(targetAddress)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to split target address %v", targetAddress)
+		return nil, errors.Mark(
+			errors.Wrapf(err, "failed to split target address %v", targetAddress),
+			ErrEngineFrontendCreateInvalidArgument)
 	}
 
 	// Phase 1: Acquire lock to check state and establish the isCreating guard
 	ef.Lock()
 	if ef.State != types.InstanceStatePending {
 		ef.Unlock()
-		return nil, fmt.Errorf("invalid state %s for engine frontend %s creation", ef.State, ef.Name)
+		return nil, errors.Wrapf(ErrEngineFrontendCreatePrecondition, "invalid state %s for engine frontend %s creation", ef.State, ef.Name)
 	}
 	if ef.isCreating {
 		ef.Unlock()
-		return nil, fmt.Errorf("engine frontend %s is already creating", ef.Name)
+		return nil, errors.Wrapf(ErrEngineFrontendCreatePrecondition, "engine frontend %s is already creating", ef.Name)
 	}
 	ef.isCreating = true
 	ef.EngineIP = targetIP
@@ -214,11 +214,8 @@ func (ef *EngineFrontend) Create(spdkClient *spdkclient.Client, targetAddress st
 				requireUpdate = true
 			}
 			ef.ErrorMsg = frontendErr.Error()
-
-			// Pattern matches old behavior: we swallow the error from the return value
-			// so the caller registers it in the map, but the state is set to Error.
-			ret = ef.getWithoutLock()
-			err = nil
+			ret = nil
+			err = frontendErr
 		} else {
 			if ef.State != types.InstanceStateError {
 				ef.ErrorMsg = ""

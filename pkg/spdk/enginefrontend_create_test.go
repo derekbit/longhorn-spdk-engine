@@ -1,6 +1,7 @@
 package spdk
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,7 +12,28 @@ import (
 	. "gopkg.in/check.v1"
 )
 
+func (s *TestSuite) TestEngineFrontendCreateReturnsErrorForFrontendFailure(c *C) {
+	fmt.Println("Testing EngineFrontend.Create returns an error while preserving the error state")
+
+	ef := NewEngineFrontend("ef-test", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	ef.NvmeTcpFrontend = nil
+
+	resp, err := ef.Create(nil, "10.0.0.1:9502")
+	c.Assert(err, NotNil)
+	c.Assert(resp, IsNil)
+
+	got := ef.Get()
+	c.Assert(got.State, Equals, string(lhtypes.InstanceStateError))
+	c.Assert(got.ErrorMsg, Matches, ".*invalid NvmeTcpFrontend.*")
+}
+
+// TestCreateDoesNotHoldLockWhileSendingUpdate verifies that Create releases
+// the struct lock before blocking on UpdateCh, so concurrent Get() calls
+// are not starved.
 func (s *TestSuite) TestCreateDoesNotHoldLockWhileSendingUpdate(c *C) {
+	fmt.Println("Testing Create does not hold the lock while sending update")
+
+	// Unbuffered channel: Create will block on the send after setting state.
 	ef := NewEngineFrontend("ef-create-lock", "engine-a", "vol-a", lhtypes.FrontendEmpty, 1024, 0, 0, make(chan interface{}))
 
 	errCh := make(chan error, 1)
@@ -20,6 +42,8 @@ func (s *TestSuite) TestCreateDoesNotHoldLockWhileSendingUpdate(c *C) {
 		errCh <- err
 	}()
 
+	// Wait for Create to reach Running (state is visible after Unlock,
+	// before the blocking UpdateCh send).
 	deadline := time.Now().Add(2 * time.Second)
 	for ef.Get().State != string(lhtypes.InstanceStateRunning) {
 		if time.Now().After(deadline) {
@@ -28,6 +52,8 @@ func (s *TestSuite) TestCreateDoesNotHoldLockWhileSendingUpdate(c *C) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	// Get() must not block — proves the lock was released before the
+	// channel send.
 	getDone := make(chan struct{}, 1)
 	go func() {
 		_ = ef.Get()
@@ -36,14 +62,14 @@ func (s *TestSuite) TestCreateDoesNotHoldLockWhileSendingUpdate(c *C) {
 
 	select {
 	case <-getDone:
-		// expected: Create is blocked on UpdateCh but lock is already released
+		// expected
 	case <-time.After(1 * time.Second):
 		c.Fatal("Get() blocked while Create is waiting on UpdateCh; lock may still be held")
 	}
 
+	// Unblock Create by draining the update channel.
 	select {
 	case <-ef.UpdateCh:
-		// unblock Create()
 	case <-time.After(1 * time.Second):
 		c.Fatal("timeout waiting for Create() update signal")
 	}
@@ -56,7 +82,12 @@ func (s *TestSuite) TestCreateDoesNotHoldLockWhileSendingUpdate(c *C) {
 	}
 }
 
+// TestConcurrentCreateHasSingleWinner verifies that only one concurrent
+// Create call on the same EngineFrontend succeeds; all others receive a
+// precondition error.
 func (s *TestSuite) TestConcurrentCreateHasSingleWinner(c *C) {
+	fmt.Println("Testing concurrent Create has a single winner")
+
 	ef := NewEngineFrontend("ef-create-concurrent", "engine-a", "vol-a", lhtypes.FrontendEmpty, 1024, 0, 0, make(chan interface{}, 32))
 
 	const workers = 20

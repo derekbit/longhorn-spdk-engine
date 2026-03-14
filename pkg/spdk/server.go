@@ -2667,7 +2667,7 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 
 	ret, err = ef.Create(spdkClient, req.TargetAddress)
 	if err != nil {
-		return nil, err
+		return nil, toEngineFrontendCreateGRPCError(err, "failed to create engine frontend %v", req.Name)
 	}
 
 	s.Lock()
@@ -2675,12 +2675,43 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 	// raced through the same window.
 	if _, exists := s.engineFrontendMap[req.Name]; exists {
 		s.Unlock()
+		// The race loser holds a fully-created frontend with real SPDK
+		// resources (bdevs, NVMe controllers, etc.). Clean them up so
+		// they don't leak.
+		if deleteErr := ef.Delete(spdkClient); deleteErr != nil {
+			logrus.WithError(deleteErr).Warnf("Failed to clean up race-loser engine frontend %v", req.Name)
+		}
 		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine frontend %v already exists", req.Name)
 	}
 	s.engineFrontendMap[req.Name] = ef
 	s.Unlock()
 
 	return ret, nil
+}
+
+func toEngineFrontendCreateGRPCError(err error, format string, args ...any) error {
+	code := grpccodes.Internal
+
+	// Check sentinel errors first — they are the most specific indicators
+	// of what went wrong and should take priority over any embedded gRPC
+	// status that might exist deeper in the error chain.
+	switch {
+	case errors.Is(err, ErrEngineFrontendCreateInvalidArgument):
+		code = grpccodes.InvalidArgument
+	case errors.Is(err, ErrEngineFrontendCreatePrecondition):
+		code = grpccodes.FailedPrecondition
+	case errors.Is(err, context.DeadlineExceeded):
+		code = grpccodes.DeadlineExceeded
+	case errors.Is(err, context.Canceled):
+		code = grpccodes.Canceled
+	default:
+		// Fall back to any embedded gRPC status.
+		if statusErr, ok := grpcstatus.FromError(errors.UnwrapAll(err)); ok {
+			code = statusErr.Code()
+		}
+	}
+
+	return grpcstatus.Error(code, errors.Wrapf(err, format, args...).Error())
 }
 
 // EngineFrontendDelete deletes an engine frontend.

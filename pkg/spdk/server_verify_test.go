@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	cockroacherrors "github.com/cockroachdb/errors"
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
@@ -274,8 +275,7 @@ func (s *TestSuite) TestEngineFrontendCreateRegistersNewFrontend(c *C) {
 		Frontend:   lhtypes.FrontendSPDKTCPNvmf,
 		SpecSize:   1024,
 	})
-	// Create may store the error in ErrorMsg and return nil error.
-	_ = err
+	c.Assert(err, IsNil)
 
 	srv.RLock()
 	ef, ok := srv.engineFrontendMap["ef-test"]
@@ -347,6 +347,9 @@ func (s *TestSuite) TestEngineFrontendCreateDoesNotRegisterFailedFrontend(c *C) 
 		TargetAddress: "2001:db8::1:9502",
 	})
 	c.Assert(err, NotNil)
+	st, ok := grpcstatus.FromError(err)
+	c.Assert(ok, Equals, true)
+	c.Assert(st.Code(), Equals, grpccodes.InvalidArgument)
 
 	srv.RLock()
 	_, exists := srv.engineFrontendMap["ef-test"]
@@ -370,4 +373,37 @@ func (s *TestSuite) TestEngineFrontendCreateDoesNotRegisterFailedFrontend(c *C) 
 	srv.RUnlock()
 	c.Assert(exists, Equals, true)
 	c.Assert(ef, NotNil)
+}
+
+func (s *TestSuite) TestToEngineFrontendCreateGRPCErrorMapsKnownErrors(c *C) {
+	fmt.Println("Testing toEngineFrontendCreateGRPCError maps known create failures to stable gRPC codes")
+
+	testCases := []struct {
+		name         string
+		err          error
+		expectedCode grpccodes.Code
+	}{
+		{
+			name:         "invalid argument",
+			err:          cockroacherrors.Wrap(ErrEngineFrontendCreateInvalidArgument, "bad target"),
+			expectedCode: grpccodes.InvalidArgument,
+		},
+		{
+			name:         "failed precondition",
+			err:          cockroacherrors.Wrap(ErrEngineFrontendCreatePrecondition, "invalid state"),
+			expectedCode: grpccodes.FailedPrecondition,
+		},
+		{
+			name:         "existing grpc status preserved",
+			err:          grpcstatus.Error(grpccodes.Unavailable, "transient"),
+			expectedCode: grpccodes.Unavailable,
+		},
+	}
+
+	for _, tc := range testCases {
+		grpcErr := toEngineFrontendCreateGRPCError(tc.err, "failed to create engine frontend %v", "ef-test")
+		st, ok := grpcstatus.FromError(grpcErr)
+		c.Assert(ok, Equals, true, Commentf("case=%s", tc.name))
+		c.Assert(st.Code(), Equals, tc.expectedCode, Commentf("case=%s", tc.name))
+	}
 }
