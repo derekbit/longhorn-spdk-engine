@@ -2661,12 +2661,20 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 	ef := NewEngineFrontend(req.Name, req.EngineName, req.VolumeName, req.Frontend, req.SpecSize,
 		req.UblkQueueDepth, req.UblkNumberOfQueue, s.updateChs[types.InstanceTypeEngineFrontend])
 	ef.metadataDir = s.metadataDir
-	s.engineFrontendMap[req.Name] = ef
 
 	spdkClient := s.spdkClient
 	s.Unlock()
 
-	return ef.Create(spdkClient, req.TargetAddress)
+	ret, err = ef.Create(spdkClient, req.TargetAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	s.Lock()
+	s.engineFrontendMap[req.Name] = ef
+	s.Unlock()
+
+	return ret, nil
 }
 
 // EngineFrontendDelete deletes an engine frontend.

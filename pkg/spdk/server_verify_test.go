@@ -323,3 +323,44 @@ func (s *TestSuite) TestEngineFrontendCreateReturnsAlreadyExistsForDuplicate(c *
 	srv.RUnlock()
 	c.Assert(ef.EngineName, Equals, "engine-a")
 }
+
+func (s *TestSuite) TestEngineFrontendCreateDoesNotRegisterFailedFrontend(c *C) {
+	fmt.Println("Testing EngineFrontendCreate does not leave a stale frontend after target address validation fails")
+
+	srv := &Server{
+		engineFrontendMap: map[string]*EngineFrontend{},
+		updateChs: map[lhtypes.InstanceType]chan interface{}{
+			lhtypes.InstanceTypeEngineFrontend: make(chan interface{}, 1),
+		},
+	}
+
+	_, err := srv.EngineFrontendCreate(context.Background(), &spdkrpc.EngineFrontendCreateRequest{
+		Name:          "ef-test",
+		EngineName:    "engine-a",
+		VolumeName:    "vol-a",
+		Frontend:      lhtypes.FrontendSPDKTCPNvmf,
+		SpecSize:      1024,
+		TargetAddress: "2001:db8::1:9502",
+	})
+	c.Assert(err, NotNil)
+
+	srv.RLock()
+	_, exists := srv.engineFrontendMap["ef-test"]
+	srv.RUnlock()
+	c.Assert(exists, Equals, false)
+
+	_, err = srv.EngineFrontendCreate(context.Background(), &spdkrpc.EngineFrontendCreateRequest{
+		Name:       "ef-test",
+		EngineName: "engine-a",
+		VolumeName: "vol-a",
+		Frontend:   lhtypes.FrontendSPDKTCPNvmf,
+		SpecSize:   1024,
+	})
+	_ = err
+
+	srv.RLock()
+	ef, exists := srv.engineFrontendMap["ef-test"]
+	srv.RUnlock()
+	c.Assert(exists, Equals, true)
+	c.Assert(ef, NotNil)
+}
