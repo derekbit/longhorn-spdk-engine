@@ -2671,6 +2671,12 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 	}
 
 	s.Lock()
+	// Re-check after Create() to guard against a concurrent create that
+	// raced through the same window.
+	if _, exists := s.engineFrontendMap[req.Name]; exists {
+		s.Unlock()
+		return nil, grpcstatus.Errorf(grpccodes.AlreadyExists, "engine frontend %v already exists", req.Name)
+	}
 	s.engineFrontendMap[req.Name] = ef
 	s.Unlock()
 

@@ -334,6 +334,10 @@ func (s *TestSuite) TestEngineFrontendCreateDoesNotRegisterFailedFrontend(c *C) 
 		},
 	}
 
+	// "2001:db8::1:9502" is intentionally an un-bracketed IPv6 with
+	// port, which net.SplitHostPort cannot parse. This triggers a hard
+	// error from Create(), verifying that the failed frontend is NOT
+	// registered in the map.
 	_, err := srv.EngineFrontendCreate(context.Background(), &spdkrpc.EngineFrontendCreateRequest{
 		Name:          "ef-test",
 		EngineName:    "engine-a",
@@ -349,6 +353,9 @@ func (s *TestSuite) TestEngineFrontendCreateDoesNotRegisterFailedFrontend(c *C) 
 	srv.RUnlock()
 	c.Assert(exists, Equals, false)
 
+	// Retry with empty TargetAddress. splitHostPort("") returns ("", 0, nil)
+	// so Create() proceeds without initiator work and succeeds, proving
+	// the name is no longer blocked by the earlier failure.
 	_, err = srv.EngineFrontendCreate(context.Background(), &spdkrpc.EngineFrontendCreateRequest{
 		Name:       "ef-test",
 		EngineName: "engine-a",
@@ -356,7 +363,7 @@ func (s *TestSuite) TestEngineFrontendCreateDoesNotRegisterFailedFrontend(c *C) 
 		Frontend:   lhtypes.FrontendSPDKTCPNvmf,
 		SpecSize:   1024,
 	})
-	_ = err
+	c.Assert(err, IsNil)
 
 	srv.RLock()
 	ef, exists := srv.engineFrontendMap["ef-test"]
