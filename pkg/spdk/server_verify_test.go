@@ -443,4 +443,13 @@ func (s *TestSuite) TestEngineFrontendLifecycleRPCsMapKnownErrors(c *C) {
 	st, ok = grpcstatus.FromError(err)
 	c.Assert(ok, Equals, true)
 	c.Assert(st.Code(), Equals, grpccodes.FailedPrecondition)
+
+	// Delete while isCreating should also return FailedPrecondition
+	deleteWhileCreating := NewEngineFrontend("ef-test", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	deleteWhileCreating.isCreating = true
+
+	_, err = newServer(deleteWhileCreating).EngineFrontendDelete(context.Background(), &spdkrpc.EngineFrontendDeleteRequest{Name: "ef-test"})
+	st, ok = grpcstatus.FromError(err)
+	c.Assert(ok, Equals, true)
+	c.Assert(st.Code(), Equals, grpccodes.FailedPrecondition)
 }
