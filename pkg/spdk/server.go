@@ -1352,6 +1352,7 @@ func (s *Server) EngineDelete(ctx context.Context, req *spdkrpc.EngineDeleteRequ
 	return &emptypb.Empty{}, nil
 }
 
+// EngineGet returns a specific engine
 func (s *Server) EngineExpand(ctx context.Context, req *spdkrpc.EngineExpandRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
@@ -1378,6 +1379,7 @@ func (s *Server) EngineExpand(ctx context.Context, req *spdkrpc.EngineExpandRequ
 	return &emptypb.Empty{}, nil
 }
 
+// EngineExpandPrecheck checks if expansion is required for an engine. The engine spec size should be updated before precheck.
 func (s *Server) EngineExpandPrecheck(ctx context.Context, req *spdkrpc.EngineExpandPrecheckRequest) (*spdkrpc.EngineExpandPrecheckResponse, error) {
 	if req.Name == "" {
 		return &spdkrpc.EngineExpandPrecheckResponse{
@@ -1406,6 +1408,7 @@ func (s *Server) EngineExpandPrecheck(ctx context.Context, req *spdkrpc.EngineEx
 	}, nil
 }
 
+// EngineFrontendSwitchOver switches over the frontend of an engine to a new target address. The engine frontend should be in normal state before switch over.
 func (s *Server) EngineFrontendSwitchOver(ctx context.Context, req *spdkrpc.EngineFrontendSwitchOverRequest) (ret *emptypb.Empty, err error) {
 	if req == nil {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "request is required")
@@ -1473,6 +1476,7 @@ func toSwitchOverGRPCError(err error, format string, args ...interface{}) error 
 	return grpcstatus.Error(code, errors.Wrapf(err, format, args...).Error())
 }
 
+// EngineFrontendSuspend suspends an engine frontend. The engine frontend can be resumed later. The engine frontend should be in normal state before suspension.
 func (s *Server) EngineFrontendSuspend(ctx context.Context, req *spdkrpc.EngineFrontendSuspendRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
@@ -1495,6 +1499,7 @@ func (s *Server) EngineFrontendSuspend(ctx context.Context, req *spdkrpc.EngineF
 	return &emptypb.Empty{}, nil
 }
 
+// EngineFrontendResume resumes an engine frontend. The engine frontend should have been suspended before resumption.
 func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFrontendResumeRequest) (ret *emptypb.Empty, err error) {
 	if req.Name == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine frontend name is required")
@@ -1517,37 +1522,10 @@ func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFr
 	return &emptypb.Empty{}, nil
 }
 
+// EngineDeleteTarget deletes the target for an engine.
+// TODO: The API is currently not implemented and will be removed in the future as target management will be handled by engine frontends instead of the engine itself.
 func (s *Server) EngineDeleteTarget(ctx context.Context, req *spdkrpc.EngineDeleteTargetRequest) (ret *emptypb.Empty, err error) {
-	// if req.Name == "" {
-	// 	return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
-	// }
-
-	// s.RLock()
-	// e := s.engineMap[req.Name]
-	// s.RUnlock()
-
-	// if e == nil {
-	// 	return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %s for target deletion", req.Name)
-	// }
-
-	// defer func() {
-	// 	if err == nil {
-	// 		s.Lock()
-	// 		// Only delete the engine if both initiator (e.Port) and target (e.TargetPort) are not exists.
-	// 		if e.NvmeTcpFrontend.TargetPort == 0 {
-	// 			e.log.Info("Deleting engine %s", req.Name)
-	// 			delete(s.engineMap, req.Name)
-	// 		}
-	// 		s.Unlock()
-	// 	}
-	// }()
-
-	// err = e.DeleteTarget(s.spdkClient, s.portAllocator)
-	// if err != nil {
-	// 	return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to delete target for engine %v", req.Name).Error())
-	// }
-
-	return &emptypb.Empty{}, nil
+	return &emptypb.Empty{}, grpcstatus.Error(grpccodes.Unimplemented, "EngineDeleteTarget is not implemented yet and will be removed in the future")
 }
 
 // EngineGet returns a specific engine
@@ -1686,6 +1664,7 @@ func (s *Server) EngineReplicaAddFinish(ctx context.Context, req *spdkrpc.Engine
 	return &emptypb.Empty{}, e.ReplicaAddFinish(req.ReplicaName, nil)
 }
 
+// EngineFrontendReplicaAdd adds a replica to an engine frontend. The engine frontend should be in normal state before replica add.
 func (s *Server) EngineFrontendReplicaAdd(ctx context.Context, req *spdkrpc.EngineFrontendReplicaAddRequest) (ret *emptypb.Empty, err error) {
 	if req.ReplicaName == "" || req.ReplicaAddress == "" {
 		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "replica name and address are required")
@@ -1711,6 +1690,7 @@ func (s *Server) EngineFrontendReplicaAdd(ctx context.Context, req *spdkrpc.Engi
 	return &emptypb.Empty{}, ef.ReplicaAdd(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync)
 }
 
+// EngineReplicaList returns all replicas for an engine
 func (s *Server) EngineReplicaList(ctx context.Context, req *spdkrpc.EngineReplicaListRequest) (ret *spdkrpc.EngineReplicaListResponse, err error) {
 	s.RLock()
 	e := s.engineMap[req.EngineName]
