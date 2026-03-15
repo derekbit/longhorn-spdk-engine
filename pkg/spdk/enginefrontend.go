@@ -270,7 +270,7 @@ func (ef *EngineFrontend) Delete(spdkClient *spdkclient.Client) (err error) {
 	ef.Lock()
 	if ef.isCreating {
 		ef.Unlock()
-		return fmt.Errorf("engine frontend %s is still creating", ef.Name)
+		return errors.Wrapf(ErrEngineFrontendLifecyclePrecondition, "engine frontend %s is still creating", ef.Name)
 	}
 	if ef.isSwitchingOver {
 		ef.Unlock()
@@ -880,7 +880,7 @@ func (ef *EngineFrontend) Suspend(_ *spdkclient.Client) (err error) {
 		return i.Suspend(false, false)
 	default:
 		// TODO: support ublk frontend suspend
-		return fmt.Errorf("suspend frontend %s is unimplemented", ef.Frontend)
+		return errors.Wrapf(ErrEngineFrontendLifecycleUnimplemented, "suspend frontend %s is unimplemented", ef.Frontend)
 	}
 }
 
@@ -928,7 +928,7 @@ func (ef *EngineFrontend) Resume(_ *spdkclient.Client) (err error) {
 		return i.Resume()
 	default:
 		// TODO: support ublk frontend resume
-		return fmt.Errorf("resume frontend %s is unimplemented", ef.Frontend)
+		return errors.Wrapf(ErrEngineFrontendLifecycleUnimplemented, "resume frontend %s is unimplemented", ef.Frontend)
 	}
 }
 

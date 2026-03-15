@@ -1489,7 +1489,7 @@ func (s *Server) EngineFrontendSuspend(ctx context.Context, req *spdkrpc.EngineF
 
 	err = ef.Suspend(spdkClient)
 	if err != nil {
-		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to suspend engine frontend %v", req.Name).Error())
+		return nil, toEngineFrontendLifecycleGRPCError(err, "failed to suspend engine frontend %v", req.Name)
 	}
 
 	return &emptypb.Empty{}, nil
@@ -1511,7 +1511,7 @@ func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFr
 
 	err = ef.Resume(spdkClient)
 	if err != nil {
-		return nil, grpcstatus.Error(grpccodes.Internal, errors.Wrapf(err, "failed to resume engine frontend %v", req.Name).Error())
+		return nil, toEngineFrontendLifecycleGRPCError(err, "failed to resume engine frontend %v", req.Name)
 	}
 
 	return &emptypb.Empty{}, nil
@@ -2714,6 +2714,27 @@ func toEngineFrontendCreateGRPCError(err error, format string, args ...any) erro
 	return grpcstatus.Error(code, errors.Wrapf(err, format, args...).Error())
 }
 
+func toEngineFrontendLifecycleGRPCError(err error, format string, args ...any) error {
+	code := grpccodes.Internal
+
+	switch {
+	case errors.Is(err, ErrEngineFrontendLifecyclePrecondition), errors.Is(err, ErrSwitchOverTargetPrecondition):
+		code = grpccodes.FailedPrecondition
+	case errors.Is(err, ErrEngineFrontendLifecycleUnimplemented):
+		code = grpccodes.Unimplemented
+	case errors.Is(err, context.DeadlineExceeded):
+		code = grpccodes.DeadlineExceeded
+	case errors.Is(err, context.Canceled):
+		code = grpccodes.Canceled
+	default:
+		if statusErr, ok := grpcstatus.FromError(errors.UnwrapAll(err)); ok {
+			code = statusErr.Code()
+		}
+	}
+
+	return grpcstatus.Error(code, errors.Wrapf(err, format, args...).Error())
+}
+
 // EngineFrontendDelete deletes an engine frontend.
 func (s *Server) EngineFrontendDelete(ctx context.Context, req *spdkrpc.EngineFrontendDeleteRequest) (ret *emptypb.Empty, err error) {
 	s.RLock()
@@ -2736,7 +2757,7 @@ func (s *Server) EngineFrontendDelete(ctx context.Context, req *spdkrpc.EngineFr
 	}
 
 	if err := ef.Delete(spdkClient); err != nil {
-		return nil, err
+		return nil, toEngineFrontendLifecycleGRPCError(err, "failed to delete engine frontend %v", req.Name)
 	}
 
 	return &emptypb.Empty{}, nil

@@ -407,3 +407,40 @@ func (s *TestSuite) TestToEngineFrontendCreateGRPCErrorMapsKnownErrors(c *C) {
 		c.Assert(st.Code(), Equals, tc.expectedCode, Commentf("case=%s", tc.name))
 	}
 }
+
+func (s *TestSuite) TestEngineFrontendLifecycleRPCsMapKnownErrors(c *C) {
+	fmt.Println("Testing EngineFrontend lifecycle RPCs map precondition and unimplemented errors consistently")
+
+	newServer := func(ef *EngineFrontend) *Server {
+		return &Server{
+			engineFrontendMap: map[string]*EngineFrontend{
+				"ef-test": ef,
+			},
+		}
+	}
+
+	suspendPrecondition := NewEngineFrontend("ef-test", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	suspendPrecondition.State = lhtypes.InstanceStateRunning
+	suspendPrecondition.isSwitchingOver = true
+
+	_, err := newServer(suspendPrecondition).EngineFrontendSuspend(context.Background(), &spdkrpc.EngineFrontendSuspendRequest{Name: "ef-test"})
+	st, ok := grpcstatus.FromError(err)
+	c.Assert(ok, Equals, true)
+	c.Assert(st.Code(), Equals, grpccodes.FailedPrecondition)
+
+	resumeUnimplemented := NewEngineFrontend("ef-test", "engine-a", "vol-a", lhtypes.FrontendEmpty, 1024, 0, 0, make(chan interface{}, 1))
+	resumeUnimplemented.State = lhtypes.InstanceStateSuspended
+
+	_, err = newServer(resumeUnimplemented).EngineFrontendResume(context.Background(), &spdkrpc.EngineFrontendResumeRequest{Name: "ef-test"})
+	st, ok = grpcstatus.FromError(err)
+	c.Assert(ok, Equals, true)
+	c.Assert(st.Code(), Equals, grpccodes.Unimplemented)
+
+	deletePrecondition := NewEngineFrontend("ef-test", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+	deletePrecondition.isSwitchingOver = true
+
+	_, err = newServer(deletePrecondition).EngineFrontendDelete(context.Background(), &spdkrpc.EngineFrontendDeleteRequest{Name: "ef-test"})
+	st, ok = grpcstatus.FromError(err)
+	c.Assert(ok, Equals, true)
+	c.Assert(st.Code(), Equals, grpccodes.FailedPrecondition)
+}
