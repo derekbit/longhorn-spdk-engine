@@ -1431,7 +1431,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 
 	engineSpdkClient, err := GetServiceClient(net.JoinHostPort(engineIP, strconv.Itoa(types.SPDKServicePort)))
 	if err != nil {
-		ef.log.WithError(err).Errorf("Failed to get SPDK client for engine frontend %v replica %s add finish", engineName, dstReplicaName)
+		ef.setReplicaAddError(errors.Wrapf(err, "failed to get SPDK client for engine frontend %v replica %s add finish", engineName, dstReplicaName))
 		return
 	}
 	defer func() {
@@ -1465,7 +1465,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after shallow copy failure", engineName, dstReplicaName)
 			err = multierr.Append(err, cleanupErr)
 		}
-		ef.log.WithError(err).Errorf("Failed to shallow copy replica %s on engine %s", dstReplicaName, engineName)
+		ef.setReplicaAddError(errors.Wrapf(err, "failed to shallow copy replica %s on engine %s", dstReplicaName, engineName))
 		return
 	}
 
@@ -1489,7 +1489,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 			ef.log.WithError(cleanupErr).Warnf("Engine frontend %s failed to clean up replica %s add after suspend failure", engineName, dstReplicaName)
 			err = multierr.Append(err, cleanupErr)
 		}
-		ef.log.WithError(err).Errorf("Failed to suspend engine frontend %s before replica add finish", engineName)
+		ef.setReplicaAddError(errors.Wrapf(err, "failed to suspend engine frontend %s before replica add finish", engineName))
 		return
 	}
 	if suspended {
@@ -1501,9 +1501,7 @@ func (ef *EngineFrontend) completeReplicaAdd(engineName, engineIP, dstReplicaNam
 				// Only mark frontend as error when resume fails — the frontend is stuck in suspended state
 				ef.setReplicaAddError(finishErr)
 			} else if finishErr != nil {
-				// Finish failed but resume succeeded — frontend is still functional,
-				// only log the error without marking frontend as error
-				ef.log.WithError(finishErr).Errorf("Replica add finish failed but engine frontend %s resumed successfully", engineName)
+				ef.setReplicaAddError(finishErr)
 			}
 		}()
 	}

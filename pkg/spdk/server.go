@@ -2645,9 +2645,17 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 	spdkClient := s.spdkClient
 	s.Unlock()
 
-	ret, err = ef.Create(spdkClient, req.TargetAddress)
-	if err != nil {
-		return nil, toEngineFrontendCreateGRPCError(err, "failed to create engine frontend %v", req.Name)
+	ret, createErr := ef.Create(spdkClient, req.TargetAddress)
+
+	// Distinguish hard errors (validation / precondition) from runtime
+	// failures (e.g. NVMe initiator can't connect).  Hard errors are
+	// returned before Create mutates state, so the frontend must NOT be
+	// registered.  Runtime failures leave the frontend in Error state;
+	// we register it so callers can inspect and clean it up via Delete.
+	if createErr != nil &&
+		(errors.Is(createErr, ErrEngineFrontendCreateInvalidArgument) ||
+			errors.Is(createErr, ErrEngineFrontendCreatePrecondition)) {
+		return nil, toEngineFrontendCreateGRPCError(createErr, "failed to create engine frontend %v", req.Name)
 	}
 
 	s.Lock()
@@ -2665,6 +2673,12 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 	}
 	s.engineFrontendMap[req.Name] = ef
 	s.Unlock()
+
+	// Runtime failure: the frontend is registered in Error state so it
+	// can be inspected and cleaned up via Delete.
+	if createErr != nil {
+		return ef.Get(), nil
+	}
 
 	return ret, nil
 }
