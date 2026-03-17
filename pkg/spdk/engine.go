@@ -989,6 +989,18 @@ func (e *Engine) replicaAddFinalize(task *replicaAddTask, finishWrapper replicaA
 	// If shallow copy failed, always call the real replicaAddFinish for cleanup
 	// (bypassing any test hook for the finish step, since we need actual resource cleanup)
 	if shallowCopyErr != nil {
+		// Mark the dst replica as ERR before cleanup so that replicaAddFinish
+		// uses the correct cleanup order: SrcFinish first (stop NVMe-oF target
+		// exposing), then DstFinish (detach controller).  Without this, the dst
+		// replica may still be in WO mode, causing replicaAddFinish to take the
+		// "normal" DstFinish-first path which triggers bdev_nvme_detach_controller
+		// ETIMEDOUT on same-node NVMe-oF while the source is still exposing.
+		e.Lock()
+		if dstStatus := e.ReplicaStatusMap[task.dstReplicaName]; dstStatus != nil && dstStatus.Mode != types.ModeERR {
+			dstStatus.Mode = types.ModeERR
+		}
+		e.Unlock()
+
 		if cleanupErr := e.replicaAddFinish(srcReplicaServiceCli, dstReplicaServiceCli, task.srcReplicaName, task.dstReplicaName, task.fastSync); cleanupErr != nil {
 			e.log.WithError(cleanupErr).Errorf("Engine %s failed to clean up after shallow copy failure for replica %s", e.Name, task.dstReplicaName)
 		}
@@ -1016,6 +1028,13 @@ func (e *Engine) replicaAddFinalize(task *replicaAddTask, finishWrapper replicaA
 		// replicaAddFinish for SPDK resource cleanup (detach external snapshot, stop expose).
 		if e.testReplicaAddFinishFn != nil {
 			e.log.Infof("Calling real replicaAddFinish for cleanup after finish failure for replica %s add", task.dstReplicaName)
+			// Mark the dst replica as ERR before cleanup so that replicaAddFinish
+			// uses the correct cleanup order (SrcFinish first, then DstFinish).
+			e.Lock()
+			if dstStatus := e.ReplicaStatusMap[task.dstReplicaName]; dstStatus != nil && dstStatus.Mode != types.ModeERR {
+				dstStatus.Mode = types.ModeERR
+			}
+			e.Unlock()
 			if cleanupErr := e.replicaAddFinish(srcReplicaServiceCli, dstReplicaServiceCli, task.srcReplicaName, task.dstReplicaName, task.fastSync); cleanupErr != nil {
 				e.log.WithError(cleanupErr).Errorf("Engine %s failed to clean up after finish failure for replica %s", e.Name, task.dstReplicaName)
 			}
