@@ -19,6 +19,45 @@ import (
 	. "gopkg.in/check.v1"
 )
 
+func (s *TestSuite) TestNewReplicaExistingReplicaUpdatesMetadataIdempotently(c *C) {
+	server := &Server{
+		replicaMap: map[string]*Replica{
+			"r1": NewReplica(context.Background(), "r1", "disk-a", "uuid-a", 1024, true, make(chan interface{}, 1)),
+		},
+	}
+
+	replica, err := server.newReplica(&spdkrpc.ReplicaCreateRequest{
+		Name:     "r1",
+		LvsName:  "disk-b",
+		LvsUuid:  "uuid-b",
+		SpecSize: 2 << 20,
+	})
+
+	c.Assert(err, IsNil)
+	c.Assert(replica, Equals, server.replicaMap["r1"])
+	c.Assert(replica.SpecSize, Equals, uint64(2<<20))
+	c.Assert(replica.LvsName, Equals, "disk-b")
+	c.Assert(replica.LvsUUID, Equals, "uuid-b")
+}
+
+func (s *TestSuite) TestNewReplicaExistingReplicaAllowsMatchingMetadata(c *C) {
+	server := &Server{
+		replicaMap: map[string]*Replica{
+			"r1": NewReplica(context.Background(), "r1", "disk-a", "uuid-a", 1024, true, make(chan interface{}, 1)),
+		},
+	}
+
+	replica, err := server.newReplica(&spdkrpc.ReplicaCreateRequest{
+		Name:     "r1",
+		LvsName:  "disk-a",
+		LvsUuid:  "uuid-a",
+		SpecSize: 1 << 20,
+	})
+
+	c.Assert(err, IsNil)
+	c.Assert(replica, Equals, server.replicaMap["r1"])
+}
+
 func (s *TestSuite) TestBuildBdevLvolMap(c *C) {
 	fmt.Println("Testing buildBdevLvolMap with valid lvol, invalid lvol with extra alias, and non-lvol bdev")
 

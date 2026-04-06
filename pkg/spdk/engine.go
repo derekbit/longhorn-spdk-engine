@@ -1524,8 +1524,7 @@ func (e *Engine) snapshotOperationPreCheckWithoutLock(replicaClients map[string]
 	return snapshotName, nil
 }
 
-func (e *Engine) snapshotOperationWithoutLock(spdkClient *spdkclient.Client, replicaClients map[string]*client.SPDKClient,
-	snapshotName string, snapshotOp SnapshotOperationType, opts any) (updated bool, replicasErr error, engineErr error) {
+func (e *Engine) snapshotOperationWithoutLock(spdkClient *spdkclient.Client, replicaClients map[string]*client.SPDKClient, snapshotName string, snapshotOp SnapshotOperationType, opts any) (updated bool, replicasErr error, engineErr error) {
 	if snapshotOp == SnapshotOperationRevert {
 		if _, err := spdkClient.BdevRaidDelete(e.Name); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
 			e.log.WithError(err).Errorf("Failed to delete RAID after snapshot %s revert", snapshotName)
@@ -2169,17 +2168,20 @@ func (e *Engine) Expand(spdkClient *spdkclient.Client, size uint64) (err error) 
 	if err != nil {
 		return err
 	}
+
+	e.Lock()
+	originalSize := e.SpecSize
 	if !requireExpansion {
+		if e.SpecSize < size {
+			e.SpecSize = size
+		}
 		// Clear stale expansion error from a previous partial failure,
 		// since there is nothing left to expand.
-		e.Lock()
 		e.lastExpansionError = ""
 		e.lastExpansionFailedAt = ""
 		e.Unlock()
 		return nil
 	}
-
-	e.Lock()
 	defer e.Unlock()
 	if e.isExpanding {
 		return fmt.Errorf("%w", ErrExpansionInProgress)
@@ -2187,7 +2189,6 @@ func (e *Engine) Expand(spdkClient *spdkclient.Client, size uint64) (err error) 
 	e.isExpanding = true
 	e.lastExpansionFailedAt = ""
 	e.lastExpansionError = ""
-	originalSize := e.SpecSize
 
 	e.log.Info("Expanding engine frontend")
 
@@ -2257,6 +2258,7 @@ func (e *Engine) Expand(spdkClient *spdkclient.Client, size uint64) (err error) 
 
 func (e *Engine) finishExpansion(fromSize, toSize uint64, err error) {
 	if err != nil {
+		e.SpecSize = fromSize
 		e.State = types.InstanceStateError
 		e.ErrorMsg = err.Error()
 		e.lastExpansionError = errors.Wrap(err, "engine failed to expand expansion").Error()
@@ -2270,6 +2272,7 @@ func (e *Engine) finishExpansion(fromSize, toSize uint64, err error) {
 	e.State = types.InstanceStateRunning
 	e.ErrorMsg = ""
 	if e.lastExpansionError != "" {
+		e.SpecSize = fromSize
 		if e.lastExpansionFailedAt == "" {
 			e.lastExpansionFailedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		}

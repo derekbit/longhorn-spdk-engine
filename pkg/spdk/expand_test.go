@@ -50,6 +50,17 @@ func (s *TestSuite) TestEngineFinishExpansionFailureSetsErrorState(c *C) {
 	c.Assert(e.SpecSize, Equals, uint64(10))
 }
 
+func (s *TestSuite) TestEngineFinishExpansionFailureRestoresOriginalSize(c *C) {
+	fmt.Println("Testing Engine finish expansion failure restores original size when spec size was updated during expand")
+
+	e := NewEngine("engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 10, make(chan interface{}, 1))
+	e.SpecSize = 20
+
+	e.finishExpansion(10, 20, errors.New("expand failed"))
+
+	c.Assert(e.SpecSize, Equals, uint64(10))
+}
+
 func (s *TestSuite) TestEngineFrontendFinishExpansionSuccessClearsErrorState(c *C) {
 	fmt.Println("Testing EngineFrontend finish expansion success clears error state")
 
@@ -109,6 +120,18 @@ func (s *TestSuite) TestEngineFinishExpansionPartialFailureKeepsOriginalSize(c *
 	c.Assert(e.ErrorMsg, Equals, "")
 	c.Assert(e.SpecSize, Equals, uint64(10))
 	c.Assert(e.lastExpansionFailedAt, Not(Equals), "")
+}
+
+func (s *TestSuite) TestEngineFinishExpansionPartialFailureRestoresOriginalSize(c *C) {
+	fmt.Println("Testing Engine finish expansion partial failure restores original size when spec size was updated during expand")
+
+	e := NewEngine("engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 10, make(chan interface{}, 1))
+	e.SpecSize = 20
+	e.lastExpansionError = "replica expand failed"
+
+	e.finishExpansion(10, 20, nil)
+
+	c.Assert(e.SpecSize, Equals, uint64(10))
 }
 
 func (s *TestSuite) TestEngineFrontendFinishExpansionPartialFailureKeepsOriginalSize(c *C) {

@@ -568,6 +568,17 @@ func (s *Server) newReplica(req *spdkrpc.ReplicaCreateRequest) (*Replica, error)
 
 	r, ok := s.replicaMap[req.Name]
 	if ok {
+		r.Lock()
+		if req.SpecSize != 0 {
+			r.SpecSize = req.SpecSize
+		}
+		if req.LvsName != "" {
+			r.LvsName = req.LvsName
+		}
+		if req.LvsUuid != "" {
+			r.LvsUUID = req.LvsUuid
+		}
+		r.Unlock()
 		return r, nil
 	}
 

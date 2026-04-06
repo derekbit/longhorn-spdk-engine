@@ -687,7 +687,7 @@ func (r *Replica) validateReplicaHead(headBdevLvol *spdktypes.BdevInfo) (err err
 		return fmt.Errorf("found mismatching lvol LvsUUID %v with recorded LvsUUID %v for replica %s", headBdevLvol.DriverSpecific.Lvol.LvolStoreUUID, r.LvsUUID, r.Name)
 	}
 	bdevLvolSpecSize := headBdevLvol.NumBlocks * uint64(headBdevLvol.BlockSize)
-	if r.SpecSize != 0 && r.SpecSize != bdevLvolSpecSize {
+	if r.SpecSize != 0 && r.SpecSize < bdevLvolSpecSize {
 		return fmt.Errorf("found mismatching lvol spec size %v with recorded spec size %v for replica %s", bdevLvolSpecSize, r.SpecSize, r.Name)
 	}
 
@@ -869,6 +869,18 @@ func (r *Replica) prepareHead(spdkClient *spdkclient.Client, backingImage *Backi
 			r.log.Info("Replica created a new head lvol")
 		}
 	} else {
+		headBdevLvol, err := spdkClient.BdevLvolGetByName(r.Alias, 0)
+		if err != nil {
+			return err
+		}
+		headSpecSize := headBdevLvol.NumBlocks * uint64(headBdevLvol.BlockSize)
+		if headSpecSize < r.SpecSize {
+			if _, err := spdkClient.BdevLvolResize(r.Alias, util.BytesToMiB(r.SpecSize)); err != nil {
+				return err
+			}
+			r.log.Infof("Replica resized the existing head lvol from %d to %d before reuse", headSpecSize, r.SpecSize)
+		}
+
 		// The head lvol is already available, so we need to update the head cache
 		r.log.Info("Replica head lvol is already available, will directly reuse it")
 	}
@@ -3110,6 +3122,16 @@ func (r *Replica) RebuildingDstStart(spdkClient *spdkclient.Client, srcReplicaNa
 	if err != nil {
 		return "", err
 	}
+	headBdevLvolSpecSize := headBdevLvol.NumBlocks * uint64(headBdevLvol.BlockSize)
+	if headBdevLvolSpecSize != r.SpecSize {
+		if _, err := spdkClient.BdevLvolResize(headBdevLvol.UUID, util.BytesToMiB(r.SpecSize)); err != nil {
+			return "", errors.Wrapf(err, "failed to resize rebuilding dst head lvol %s from %d to %d", headBdevLvol.Name, headBdevLvolSpecSize, r.SpecSize)
+		}
+		headBdevLvol, err = spdkClient.BdevLvolGetByName(headLvolUUID, 0)
+		if err != nil {
+			return "", err
+		}
+	}
 	r.Head = BdevLvolInfoToServiceLvol(&headBdevLvol)
 	r.ActiveChain = append(r.ActiveChain, r.Head)
 
@@ -3529,11 +3551,15 @@ func (r *Replica) rebuildingDstShallowCopyPrepare(spdkClient *spdkclient.Client,
 	}
 	r.rebuildingDstCache.rebuildingLvol = BdevLvolInfoToServiceLvol(&rebuildingBdevLvol)
 
-	if srcSnapSvcLvol.SpecSize != r.rebuildingDstCache.rebuildingLvol.SpecSize {
-		if _, err := spdkClient.BdevLvolResize(r.rebuildingDstCache.rebuildingLvol.Alias, util.BytesToMiB(srcSnapSvcLvol.SpecSize)); err != nil {
+	targetRebuildingLvolSize := srcSnapSvcLvol.SpecSize
+	if snapshotName == r.rebuildingDstCache.externalSnapshotName && targetRebuildingLvolSize < r.SpecSize {
+		targetRebuildingLvolSize = r.SpecSize
+	}
+	if targetRebuildingLvolSize != r.rebuildingDstCache.rebuildingLvol.SpecSize {
+		if _, err := spdkClient.BdevLvolResize(r.rebuildingDstCache.rebuildingLvol.Alias, util.BytesToMiB(targetRebuildingLvolSize)); err != nil {
 			return "", false, err
 		}
-		r.rebuildingDstCache.rebuildingLvol.SpecSize = srcSnapSvcLvol.SpecSize
+		r.rebuildingDstCache.rebuildingLvol.SpecSize = targetRebuildingLvolSize
 	}
 
 	// Apply QoS limit if set
