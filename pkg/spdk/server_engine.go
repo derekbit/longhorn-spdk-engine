@@ -248,7 +248,7 @@ func (s *Server) EngineWatch(req *emptypb.Empty, srv spdkrpc.SPDKService_EngineW
 //
 // When EngineFrontendName and EngineFrontendAddress are both provided, Engine
 // calls back to the EngineFrontend for suspend/resume around the snapshot and
-// finish steps. When both are omitted, ReplicaAdd runs without a finishWrapper,
+// finish steps. When both are omitted, ReplicaAdd runs without a frontendSuspendResumeWrapper,
 // preserving the older direct-engine API behavior.
 func (s *Server) EngineReplicaAdd(ctx context.Context, req *spdkrpc.EngineReplicaAddRequest) (ret *emptypb.Empty, err error) {
 	if req.ReplicaName == "" || req.ReplicaAddress == "" {
@@ -270,17 +270,17 @@ func (s *Server) EngineReplicaAdd(ctx context.Context, req *spdkrpc.EngineReplic
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for replica %s add", req.EngineName, req.ReplicaName)
 	}
 
-	var finishWrapper replicaAddFinishWrapper
+	var frontendSuspendResumeWrapper replicaAddFrontendSuspendResumeWrapper
 	if efName != "" {
 		log := logrus.WithFields(logrus.Fields{
 			"engineName":     req.EngineName,
 			"replicaName":    req.ReplicaName,
 			"engineFrontend": efName,
 		})
-		finishWrapper = buildGRPCReplicaAddFinishWrapper(efName, efAddress, log)
+		frontendSuspendResumeWrapper = buildGRPCReplicaAddFrontendSuspendResumeWrapper(efName, efAddress, log)
 	}
 
-	if err := e.ReplicaAdd(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync, finishWrapper); err != nil {
+	if err := e.ReplicaAdd(spdkClient, req.ReplicaName, req.ReplicaAddress, req.FastSync, frontendSuspendResumeWrapper); err != nil {
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "failed to add replica %s to engine %s: %v", req.ReplicaName, req.EngineName, err)
 	}
 	return &emptypb.Empty{}, nil

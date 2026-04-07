@@ -85,15 +85,15 @@ func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFr
 // # Engine-side flow (Server.EngineReplicaAdd → Engine.ReplicaAdd)
 //
 // Server.EngineReplicaAdd reads the EF fields from the request, then
-// calls buildGRPCReplicaAddFinishWrapper to create a replicaAddFinishWrapper
+// calls buildGRPCReplicaAddFrontendSuspendResumeWrapper to create a replicaAddFrontendSuspendResumeWrapper
 // — a callback that will call back to this EF for suspend/resume during both
 // the snapshot-creation step and the finish step. It then delegates to
-// Engine.ReplicaAdd(finishWrapper).
+// Engine.ReplicaAdd(frontendSuspendResumeWrapper).
 //
 // Engine.ReplicaAdd runs the synchronous part under the Engine lock:
 //
-//  0. Snapshot + setup (sync, under finishWrapper): suspend frontend via
-//     finishWrapper → create rebuild snapshot, connect to src/dst replica
+//  0. Snapshot + setup (sync, under frontendSuspendResumeWrapper): suspend frontend via
+//     frontendSuspendResumeWrapper → create rebuild snapshot, connect to src/dst replica
 //     SPDK services, add dst replica head bdev to RAID, mark dst as ModeWO
 //     → resume frontend.
 //
@@ -102,19 +102,19 @@ func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFr
 //
 //  1. Shallow copy (async): iterate over snapshots and copy data from the
 //     source replica to the destination replica via SPDK shallow copy.
-//  2. Finish (async): orchestrates the finish step with the finishWrapper:
+//  2. Finish (async): orchestrates the finish step with the frontendSuspendResumeWrapper:
 //     a. If shallow copy failed, mark dst replica as ModeERR, call the
 //     real replicaAddFinish for SPDK resource cleanup (detach external
 //     snapshot controller, stop expose).
-//     b. If shallow copy succeeded, call finishWrapper(finish):
-//     - finishWrapper (buildGRPCReplicaAddFinishWrapper) calls back to
+//     b. If shallow copy succeeded, call frontendSuspendResumeWrapper(finish):
+//     - frontendSuspendResumeWrapper (buildGRPCReplicaAddFrontendSuspendResumeWrapper) calls back to
 //     EF via gRPC: Suspend → finish() → Resume
 //     - finish() (replicaAddFinish) detaches the external snapshot
 //     NVMe controller on the dst replica, stops the src replica from
 //     exposing, and promotes the dst replica from ModeWO to ModeRW.
 //     c. If finish fails and was never called (e.g. suspend failure in
-//     finishWrapper), a cleanup call to the real replicaAddFinish runs
-//     inside finishWrapper for SPDK resource cleanup.
+//     frontendSuspendResumeWrapper), a cleanup call to the real replicaAddFinish runs
+//     inside frontendSuspendResumeWrapper for SPDK resource cleanup.
 //
 // This call returns as soon as the synchronous part succeeds; the
 // remaining phases run in the background goroutine. The caller can monitor
@@ -127,7 +127,7 @@ func (s *Server) EngineFrontendResume(ctx context.Context, req *spdkrpc.EngineFr
 // If the Engine's async goroutine fails at any phase, it sets the replica
 // to ModeERR and cleans up SPDK resources — without notifying EF.
 //
-// The finishWrapper (buildGRPCReplicaAddFinishWrapper) handles EF-unreachable
+// The frontendSuspendResumeWrapper (buildGRPCReplicaAddFrontendSuspendResumeWrapper) handles EF-unreachable
 // scenarios gracefully:
 //   - EF node down / pod deleted (GetServiceClient fails) → proceed with
 //     the operation without suspension (no active I/O = suspension unnecessary).

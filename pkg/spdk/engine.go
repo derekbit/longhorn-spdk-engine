@@ -611,7 +611,7 @@ func (e *Engine) getWithoutLock() (res *spdkrpc.Engine) {
 	return res
 }
 
-type replicaAddFinishWrapper func(work func() error) error
+type replicaAddFrontendSuspendResumeWrapper func(work func() error) error
 
 // ReplicaAdd performs the full replica-add flow consisting of three phases:
 //
@@ -619,7 +619,7 @@ type replicaAddFinishWrapper func(work func() error) error
 //  1. Validate engine state is Running, dst replica doesn't exist, no other WO replica.
 //  2. Obtain replica gRPC clients for all existing replicas, plus src/dst rebuild clients.
 //  3. Pick an RW replica as the rebuild source.
-//  4. Call replicaAddStart (optionally wrapped by finishWrapper for EF suspend/resume):
+//  4. Call replicaAddStart (optionally wrapped by frontendSuspendResumeWrapper for EF suspend/resume):
 //     a. Create rebuild snapshot across all replicas.
 //     b. Get rebuilding snapshot list from src replica.
 //     c. ReplicaRebuildingSrcStart: src replica exposes snapshot as NVMe-oF target.
@@ -637,12 +637,12 @@ type replicaAddFinishWrapper func(work func() error) error
 // Phase 2 — Finish or Cleanup (replicaAddCleanupOrFinish, two mutually exclusive paths):
 //
 //	Path A — Failure (asyncErr != nil):
-//	  9. Call e.replicaAddFinish() directly (no finishWrapper, no suspend/resume) for SPDK resource cleanup.
+//	  9. Call e.replicaAddFinish() directly (no frontendSuspendResumeWrapper, no suspend/resume) for SPDK resource cleanup.
 //	     Replica is already ERR. replicaAddFinish uses the same DstFinish→SrcFinish order as the success path.
 //
 //	Path B — Success (asyncErr == nil):
-//	 10. Call adder.ReplicaAddFinish() via finishWrapper (if present) or directly.
-//	     finishWrapper (buildGRPCReplicaAddFinishWrapper) does:
+//	 10. Call adder.ReplicaAddFinish() via frontendSuspendResumeWrapper (if present) or directly.
+//	     frontendSuspendResumeWrapper (buildGRPCReplicaAddFrontendSuspendResumeWrapper) does:
 //	       a. EF Suspend (gRPC to EngineFrontend).
 //	       b. Execute replicaAddFinish (3-phase lock pattern):
 //	          Phase 1 (lock): read dst mode. Phase 2 (unlock): RPC calls. Phase 3 (lock): update mode.
@@ -650,7 +650,7 @@ type replicaAddFinishWrapper func(work func() error) error
 //	 11. If finish returns error: mark dst replica ERR. SPDK resource cleanup is NOT retried —
 //	     it is the responsibility of the ReplicaAdder (mock should call Real.ReplicaAddFinish()
 //	     before returning error) or r.Delete() when the replica is subsequently removed.
-func (e *Engine) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaName, dstReplicaAddress string, fastSync bool, finishWrapper replicaAddFinishWrapper) (err error) {
+func (e *Engine) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaName, dstReplicaAddress string, fastSync bool, frontendSuspendResumeWrapper replicaAddFrontendSuspendResumeWrapper) (err error) {
 	updateRequired := false
 
 	e.Lock()
@@ -753,8 +753,8 @@ func (e *Engine) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaName, dstRe
 		return startEngineErr
 	}
 
-	if finishWrapper != nil {
-		if wrapErr := finishWrapper(startFn); wrapErr != nil {
+	if frontendSuspendResumeWrapper != nil {
+		if wrapErr := frontendSuspendResumeWrapper(startFn); wrapErr != nil {
 			// The wrapper itself may fail (e.g. suspend or resume failure).
 			// If the inner startFn already set engineErr, those are captured
 			// via closure.
@@ -772,7 +772,7 @@ func (e *Engine) ReplicaAdd(spdkClient *spdkclient.Client, dstReplicaName, dstRe
 	// Launch the async phase: shallow copy followed by cleanup or finish.
 	// Even on setup failure, the goroutine handles SPDK resource cleanup
 	// (exposed snapshot, NVMe connections) via replicaAddCleanupOrFinish.
-	go e.replicaAddAsync(srcReplicaServiceCli, dstReplicaServiceCli, srcReplicaName, srcReplicaAddress, dstReplicaName, dstReplicaAddress, rebuildingSnapshotList, fastSync, finishWrapper, setupErr)
+	go e.replicaAddAsync(srcReplicaServiceCli, dstReplicaServiceCli, srcReplicaName, srcReplicaAddress, dstReplicaName, dstReplicaAddress, rebuildingSnapshotList, fastSync, frontendSuspendResumeWrapper, setupErr)
 
 	if setupErr != nil {
 		return setupErr
@@ -863,7 +863,7 @@ func (e *Engine) replicaAddAsync(
 	srcReplicaName, srcReplicaAddress, dstReplicaName, dstReplicaAddress string,
 	rebuildingSnapshotList []*api.Lvol,
 	fastSync bool,
-	finishWrapper replicaAddFinishWrapper,
+	frontendSuspendResumeWrapper replicaAddFrontendSuspendResumeWrapper,
 	setupErr error,
 ) {
 	defer func() {
@@ -879,7 +879,7 @@ func (e *Engine) replicaAddAsync(
 
 	var asyncErr error
 	defer func() {
-		e.replicaAddCleanupOrFinish(adder, srcReplicaServiceCli, dstReplicaServiceCli, srcReplicaName, srcReplicaAddress, dstReplicaName, dstReplicaAddress, finishWrapper, asyncErr)
+		e.replicaAddCleanupOrFinish(adder, srcReplicaServiceCli, dstReplicaServiceCli, srcReplicaName, srcReplicaAddress, dstReplicaName, dstReplicaAddress, frontendSuspendResumeWrapper, asyncErr)
 	}()
 
 	// Check for errors from the synchronous setup phase
@@ -898,14 +898,14 @@ func (e *Engine) replicaAddAsync(
 }
 
 // replicaAddCleanupOrFinish handles the completion of the async replica add phase.
-// If asyncErr is non-nil, it calls replicaAddFinish directly (no finishWrapper) for
+// If asyncErr is non-nil, it calls replicaAddFinish directly (no frontendSuspendResumeWrapper) for
 // SPDK resource cleanup. If asyncErr is nil, it runs the finish flow via the adder
-// (optionally wrapped by finishWrapper for suspend/resume).
+// (optionally wrapped by frontendSuspendResumeWrapper for suspend/resume).
 func (e *Engine) replicaAddCleanupOrFinish(
 	adder ReplicaAdder,
 	srcReplicaServiceCli, dstReplicaServiceCli *client.SPDKClient,
 	srcReplicaName, srcReplicaAddress, dstReplicaName, dstReplicaAddress string,
-	finishWrapper replicaAddFinishWrapper,
+	frontendSuspendResumeWrapper replicaAddFrontendSuspendResumeWrapper,
 	asyncErr error,
 ) {
 	if asyncErr != nil {
@@ -929,8 +929,8 @@ func (e *Engine) replicaAddCleanupOrFinish(
 	}
 
 	var finishErr error
-	if finishWrapper != nil {
-		finishErr = finishWrapper(finishFn)
+	if frontendSuspendResumeWrapper != nil {
+		finishErr = frontendSuspendResumeWrapper(finishFn)
 	} else {
 		finishErr = finishFn()
 	}

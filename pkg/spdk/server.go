@@ -630,7 +630,7 @@ func toSwitchOverGRPCError(err error, format string, args ...interface{}) error 
 	return grpcstatus.Error(code, errors.Wrapf(err, format, args...).Error())
 }
 
-// buildGRPCReplicaAddFinishWrapper builds a replicaAddFinishWrapper that
+// buildGRPCReplicaAddFrontendSuspendResumeWrapper builds a replicaAddFrontendSuspendResumeWrapper that
 // calls back to the EngineFrontend on a (potentially remote) node via gRPC
 // for suspend/resume around the work step.
 //
@@ -638,7 +638,7 @@ func toSwitchOverGRPCError(err error, format string, args ...interface{}) error 
 // wrapper proceeds with work() without suspension. This is safe because an
 // unreachable frontend means there is no active I/O to quiesce, and not
 // running the work would leak SPDK resources (detach controller, stop expose).
-func buildGRPCReplicaAddFinishWrapper(efName, efAddress string, log *logrus.Entry) replicaAddFinishWrapper {
+func buildGRPCReplicaAddFrontendSuspendResumeWrapper(efName, efAddress string, log *logrus.Entry) replicaAddFrontendSuspendResumeWrapper {
 	return func(work func() error) error {
 		efClient, err := GetServiceClient(efAddress)
 		if err != nil {
