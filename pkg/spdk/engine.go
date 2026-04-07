@@ -2077,8 +2077,15 @@ func (e *Engine) isReplicaRestoreCompleted(replicaName, replicaAddress string) (
 }
 
 func (e *Engine) BackupRestoreFinish(spdkClient *spdkclient.Client) error {
+	updateRequired := false
+
 	e.Lock()
-	defer e.Unlock()
+	defer func() {
+		e.Unlock()
+		if updateRequired {
+			e.UpdateCh <- nil
+		}
+	}()
 
 	replicaBdevList := []string{}
 	for replicaName, replicaStatus := range e.ReplicaStatusMap {
@@ -2100,6 +2107,7 @@ func (e *Engine) BackupRestoreFinish(spdkClient *spdkclient.Client) error {
 		}
 
 		replicaStatus.BdevName = nvmeBdevNameList[0]
+		replicaStatus.Mode = types.ModeRW
 
 		replicaBdevList = append(replicaBdevList, replicaStatus.BdevName)
 	}
@@ -2113,6 +2121,8 @@ func (e *Engine) BackupRestoreFinish(spdkClient *spdkclient.Client) error {
 	}
 
 	e.IsRestoring = false
+	e.checkAndUpdateInfoFromReplicaNoLock()
+	updateRequired = true
 
 	return nil
 }
@@ -2246,11 +2256,16 @@ func (e *Engine) Expand(spdkClient *spdkclient.Client, size uint64) (err error) 
 		return errors.Wrap(err, "failed to reconstruct RAID bdev")
 	}
 
-	e.log.Infof("Starting to expose RAID bdev for engine target %v on %v:%v",
-		e.Name, e.NvmeTcpTarget.IP, e.NvmeTcpTarget.Port)
-	if err := spdkClient.StartExposeBdev(e.NvmeTcpTarget.Nqn, e.Name, e.NvmeTcpTarget.Nguid,
-		e.NvmeTcpTarget.IP, strconv.Itoa(int(e.NvmeTcpTarget.Port))); err != nil {
-		return errors.Wrapf(err, "failed to start exposing RAID bdev for engine target %v", e.Name)
+	switch e.Frontend {
+	case types.FrontendSPDKTCPBlockdev, types.FrontendSPDKTCPNvmf:
+		e.log.Infof("Starting to expose RAID bdev for engine target %v on %v:%v",
+			e.Name, e.NvmeTcpTarget.IP, e.NvmeTcpTarget.Port)
+		if err := spdkClient.StartExposeBdev(e.NvmeTcpTarget.Nqn, e.Name, e.NvmeTcpTarget.Nguid,
+			e.NvmeTcpTarget.IP, strconv.Itoa(int(e.NvmeTcpTarget.Port))); err != nil {
+			return errors.Wrapf(err, "failed to start exposing RAID bdev for engine target %v", e.Name)
+		}
+	case types.FrontendEmpty:
+		e.log.Infof("Skipping RAID bdev exposure for engine %s after expansion because frontend is empty", e.Name)
 	}
 
 	return expandErr
