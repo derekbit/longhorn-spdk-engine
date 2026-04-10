@@ -201,6 +201,9 @@ type EngineFrontend struct {
 	ActualSize            uint64 `json:"actual_size"`
 	TargetIP              string `json:"target_ip"`
 	TargetPort            int32  `json:"target_port"`
+	ActivePath            string `json:"active_path"`
+	PreferredPath         string `json:"preferred_path"`
+	Paths                 []*EngineFrontendNvmeTCPPath `json:"paths"`
 	Frontend              string `json:"frontend"`
 	Endpoint              string `json:"endpoint"`
 	UUID                  string `json:"uuid"`
@@ -212,6 +215,16 @@ type EngineFrontend struct {
 	LastExpansionFailedAt string `json:"last_expansion_failed_at"`
 }
 
+type EngineFrontendNvmeTCPPath struct {
+	Address    string `json:"address"`
+	TargetIP   string `json:"target_ip"`
+	TargetPort int32  `json:"target_port"`
+	EngineName string `json:"engine_name"`
+	NQN        string `json:"nqn"`
+	NGUID      string `json:"nguid"`
+	ANAState   string `json:"ana_state"`
+}
+
 func ProtoEngineFrontendToEngineFrontend(ef *spdkrpc.EngineFrontend) *EngineFrontend {
 	res := &EngineFrontend{
 		Name:                  ef.Name,
@@ -221,6 +234,9 @@ func ProtoEngineFrontendToEngineFrontend(ef *spdkrpc.EngineFrontend) *EngineFron
 		ActualSize:            ef.ActualSize,
 		TargetIP:              ef.TargetIp,
 		TargetPort:            ef.TargetPort,
+		ActivePath:            ef.ActivePath,
+		PreferredPath:         ef.PreferredPath,
+		Paths:                 make([]*EngineFrontendNvmeTCPPath, 0, len(ef.Paths)),
 		Frontend:              ef.Frontend,
 		Endpoint:              ef.Endpoint,
 		UUID:                  ef.Uuid,
@@ -230,6 +246,21 @@ func ProtoEngineFrontendToEngineFrontend(ef *spdkrpc.EngineFrontend) *EngineFron
 		IsExpanding:           ef.IsExpanding,
 		LastExpansionError:    ef.LastExpansionError,
 		LastExpansionFailedAt: ef.LastExpansionFailedAt,
+	}
+
+	for _, path := range ef.Paths {
+		if path == nil {
+			continue
+		}
+		res.Paths = append(res.Paths, &EngineFrontendNvmeTCPPath{
+			Address:    path.Address,
+			TargetIP:   path.TargetIp,
+			TargetPort: path.TargetPort,
+			EngineName: path.EngineName,
+			NQN:        path.Nqn,
+			NGUID:      path.Nguid,
+			ANAState:   path.AnaState,
+		})
 	}
 
 	return res

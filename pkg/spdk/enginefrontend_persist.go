@@ -21,13 +21,28 @@ const (
 // EngineFrontend after an instance-manager restart. It is persisted to
 // <metadataDir>/enginefrontends/<volumeName>/enginefrontend.json.
 type EngineFrontendRecord struct {
-	Name       string `json:"name"`
-	EngineName string `json:"engineName"`
-	VolumeName string `json:"volumeName"`
-	Frontend   string `json:"frontend"`
-	SpecSize   uint64 `json:"specSize"`
-	TargetIP   string `json:"targetIP"`
-	TargetPort int32  `json:"targetPort"`
+	Name          string                      `json:"name"`
+	EngineName    string                      `json:"engineName"`
+	VolumeName    string                      `json:"volumeName"`
+	VolumeNQN     string                      `json:"volumeNqn,omitempty"`
+	VolumeNGUID   string                      `json:"volumeNguid,omitempty"`
+	Frontend      string                      `json:"frontend"`
+	SpecSize      uint64                      `json:"specSize"`
+	TargetIP      string                      `json:"targetIP"`
+	TargetPort    int32                       `json:"targetPort"`
+	ActivePath    string                      `json:"activePath,omitempty"`
+	PreferredPath string                      `json:"preferredPath,omitempty"`
+	Paths         []*EngineFrontendPathRecord `json:"paths,omitempty"`
+}
+
+type EngineFrontendPathRecord struct {
+	Address    string          `json:"address"`
+	TargetIP   string          `json:"targetIP"`
+	TargetPort int32           `json:"targetPort"`
+	EngineName string          `json:"engineName,omitempty"`
+	Nqn        string          `json:"nqn,omitempty"`
+	Nguid      string          `json:"nguid,omitempty"`
+	ANAState   NvmeTCPANAState `json:"anaState,omitempty"`
 }
 
 // engineFrontendRecordDir returns the directory path for a volume's record.
@@ -60,13 +75,29 @@ func saveEngineFrontendRecord(metadataDir string, ef *EngineFrontend) error {
 	}
 
 	record := &EngineFrontendRecord{
-		Name:       ef.Name,
-		EngineName: ef.EngineName,
-		VolumeName: ef.VolumeName,
-		Frontend:   ef.Frontend,
-		SpecSize:   ef.SpecSize,
-		TargetIP:   targetIP,
-		TargetPort: targetPort,
+		Name:          ef.Name,
+		EngineName:    ef.EngineName,
+		VolumeName:    ef.VolumeName,
+		VolumeNQN:     ef.VolumeNQN,
+		VolumeNGUID:   ef.VolumeNGUID,
+		Frontend:      ef.Frontend,
+		SpecSize:      ef.SpecSize,
+		TargetIP:      targetIP,
+		TargetPort:    targetPort,
+		ActivePath:    ef.ActivePath,
+		PreferredPath: ef.PreferredPath,
+	}
+
+	for _, path := range ef.NvmeTCPPathMap {
+		record.Paths = append(record.Paths, &EngineFrontendPathRecord{
+			Address:    path.Address,
+			TargetIP:   path.TargetIP,
+			TargetPort: path.TargetPort,
+			EngineName: path.EngineName,
+			Nqn:        path.Nqn,
+			Nguid:      path.Nguid,
+			ANAState:   path.ANAState,
+		})
 	}
 
 	dir := engineFrontendRecordDir(metadataDir, ef.VolumeName)
@@ -173,6 +204,29 @@ func loadEngineFrontendRecords(metadataDir string) ([]*EngineFrontendRecord, err
 				logrus.WithError(removeErr).Warnf("Failed to remove invalid engine frontend record directory %s", volumeName)
 			}
 			continue
+		}
+
+		if record.VolumeNQN == "" {
+			record.VolumeNQN = getStableVolumeNQN(record.VolumeName)
+		}
+		if record.VolumeNGUID == "" {
+			record.VolumeNGUID = getStableVolumeNGUID(record.VolumeName)
+		}
+		if len(record.Paths) == 0 && record.TargetIP != "" && record.TargetPort != 0 {
+			address := getNvmeTCPPathAddress(record.TargetIP, record.TargetPort)
+			record.ActivePath = address
+			if record.PreferredPath == "" {
+				record.PreferredPath = address
+			}
+			record.Paths = []*EngineFrontendPathRecord{{
+				Address:    address,
+				TargetIP:   record.TargetIP,
+				TargetPort: record.TargetPort,
+				EngineName: record.EngineName,
+				Nqn:        record.VolumeNQN,
+				Nguid:      record.VolumeNGUID,
+				ANAState:   NvmeTCPANAStateOptimized,
+			}}
 		}
 
 		records = append(records, record)

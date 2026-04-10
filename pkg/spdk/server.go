@@ -917,6 +917,27 @@ func (s *Server) recoverEngineFrontends() {
 		ef := NewEngineFrontend(record.Name, record.EngineName, record.VolumeName,
 			record.Frontend, record.SpecSize, 0, 0, s.updateChs[types.InstanceTypeEngineFrontend])
 		ef.metadataDir = s.metadataDir
+		ef.VolumeNQN = record.VolumeNQN
+		ef.VolumeNGUID = record.VolumeNGUID
+		ef.ActivePath = record.ActivePath
+		ef.PreferredPath = record.PreferredPath
+		if len(record.Paths) > 0 {
+			ef.NvmeTCPPathMap = map[string]*NvmeTCPPath{}
+			for _, path := range record.Paths {
+				if path == nil || path.Address == "" {
+					continue
+				}
+				ef.NvmeTCPPathMap[path.Address] = &NvmeTCPPath{
+					Address:    path.Address,
+					TargetIP:   path.TargetIP,
+					TargetPort: path.TargetPort,
+					EngineName: path.EngineName,
+					Nqn:        path.Nqn,
+					Nguid:      path.Nguid,
+					ANAState:   path.ANAState,
+				}
+			}
+		}
 		if ef.NvmeTcpFrontend != nil {
 			if record.TargetIP != "" {
 				ef.NvmeTcpFrontend.TargetIP = record.TargetIP

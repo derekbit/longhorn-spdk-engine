@@ -178,6 +178,39 @@ func (s *Server) EngineDeleteTarget(ctx context.Context, req *spdkrpc.EngineDele
 	return &emptypb.Empty{}, grpcstatus.Error(grpccodes.Unimplemented, "EngineDeleteTarget is not implemented yet and will be removed in the future")
 }
 
+// EngineSetTargetListenerANAState updates the ANA state of an engine's exported NVMe/TCP listener.
+func (s *Server) EngineSetTargetListenerANAState(ctx context.Context, req *spdkrpc.EngineSetTargetListenerANAStateRequest) (ret *emptypb.Empty, err error) {
+	if req == nil {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "request is required")
+	}
+	if req.Name == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "engine name is required")
+	}
+	if req.AnaState == "" {
+		return nil, grpcstatus.Error(grpccodes.InvalidArgument, "ANA state is required")
+	}
+
+	anaState := NvmeTCPANAState(req.AnaState)
+	if _, mapErr := toSPDKListenerANAState(anaState); mapErr != nil {
+		return nil, grpcstatus.Errorf(grpccodes.InvalidArgument, "invalid ANA state %q", req.AnaState)
+	}
+
+	s.RLock()
+	e := s.engineMap[req.Name]
+	spdkClient := s.spdkClient
+	s.RUnlock()
+
+	if e == nil {
+		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine %v for ANA state update", req.Name)
+	}
+
+	if err := e.SetTargetListenerANAState(spdkClient, anaState); err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "failed to set ANA state %s for engine %s: %v", anaState, req.Name, err)
+	}
+
+	return &emptypb.Empty{}, nil
+}
+
 // EngineGet returns a specific engine
 func (s *Server) EngineGet(ctx context.Context, req *spdkrpc.EngineGetRequest) (ret *spdkrpc.Engine, err error) {
 	s.RLock()

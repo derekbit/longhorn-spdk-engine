@@ -1,5 +1,36 @@
 package types
 
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+)
+
+type NvmfANAGroupID string
+
+const DefaultNvmfANAGroupID uint32 = 1
+
+func (groupID *NvmfANAGroupID) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*groupID = ""
+		return nil
+	}
+
+	var stringValue string
+	if err := json.Unmarshal(data, &stringValue); err == nil {
+		*groupID = NvmfANAGroupID(stringValue)
+		return nil
+	}
+
+	var numericValue uint32
+	if err := json.Unmarshal(data, &numericValue); err == nil {
+		*groupID = NvmfANAGroupID(strconv.FormatUint(uint64(numericValue), 10))
+		return nil
+	}
+
+	return fmt.Errorf("failed to unmarshal ANA group ID %s", string(data))
+}
+
 type NvmfCreateTransportRequest struct {
 	Trtype NvmeTransportType `json:"trtype"`
 }
@@ -76,7 +107,7 @@ type NvmfSubsystemNamespace struct {
 	Nguid    string `json:"nguid,omitempty"`
 	Eui64    string `json:"eui64,omitempty"`
 	UUID     string `json:"uuid,omitempty"`
-	Anagrpid string `json:"anagrpid,omitempty"`
+	Anagrpid NvmfANAGroupID `json:"anagrpid,omitempty"`
 	PtplFile string `json:"ptpl_file,omitempty"`
 }
 
@@ -110,6 +141,15 @@ type NvmfSubsystemRemoveListenerRequest struct {
 	TgtName string `json:"tgt_name,omitempty"`
 }
 
+type NvmfSubsystemListenerSetANAStateRequest struct {
+	Nqn           string                        `json:"nqn"`
+	ListenAddress NvmfSubsystemListenAddress    `json:"listen_address"`
+	AnaState      NvmfSubsystemListenerAnaState `json:"ana_state"`
+	AnaGrpid      uint32                        `json:"anagrpid,omitempty"`
+
+	TgtName string `json:"tgt_name,omitempty"`
+}
+
 type NvmfSubsystemGetListenersRequest struct {
 	Nqn string `json:"nqn"`
 
@@ -121,7 +161,7 @@ type NvmfSubsystemListenerAnaState string
 const (
 	NvmfSubsystemListenerAnaStateOptimized      = "optimized"
 	NvmfSubsystemListenerAnaStateNonOptimized   = "non-optimized"
-	NvmfSubsystemListenerAnaStateInaccessible   = "Inaccessible"
+	NvmfSubsystemListenerAnaStateInaccessible   = "inaccessible"
 	NvmfSubsystemListenerAnaStatePersistentLoss = "persistent-loss"
 	NvmfSubsystemListenerAnaStateChange         = "change"
 )

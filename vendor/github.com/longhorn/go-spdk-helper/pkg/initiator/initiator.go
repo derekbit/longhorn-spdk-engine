@@ -172,6 +172,62 @@ func (i *Initiator) ConnectNVMeTCPTarget(ip, port, nqn string) (string, error) {
 	return ConnectTarget(ip, port, nqn, i.executor)
 }
 
+// ConnectNVMeTCPPath connects an additional NVMe/TCP path without touching dm-linear.
+// It is intended for native multipath switchover flows where dm-linear must remain
+// intact for later snapshot suspend/resume operations.
+func (i *Initiator) ConnectNVMeTCPPath(transportAddress, transportServiceID string) (err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrapf(err, "failed to connect NVMe/TCP path for initiator %s", i.Name)
+		}
+	}()
+
+	if i.NVMeTCPInfo == nil {
+		return fmt.Errorf("nvmeTCPInfo is nil")
+	}
+	if transportAddress == "" || transportServiceID == "" {
+		return fmt.Errorf("invalid transportAddress %s and transportServiceID %s for initiator %s", transportAddress, transportServiceID, i.Name)
+	}
+
+	if i.hostProc != "" {
+		lock, err := i.newLock()
+		if err != nil {
+			return err
+		}
+		defer lock.Unlock()
+	}
+
+	return i.connectNVMeTCPPathWithoutLock(transportAddress, transportServiceID)
+}
+
+// ReconnectNVMeTCPPath refreshes the current NVMe/TCP initiator state for the
+// specified path without touching dm-linear. It reuses an existing matching
+// path when present and otherwise establishes a new multipath connection.
+func (i *Initiator) ReconnectNVMeTCPPath(transportAddress, transportServiceID string) (err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrapf(err, "failed to reconnect NVMe/TCP path for initiator %s", i.Name)
+		}
+	}()
+
+	if i.NVMeTCPInfo == nil {
+		return fmt.Errorf("nvmeTCPInfo is nil")
+	}
+	if transportAddress == "" || transportServiceID == "" {
+		return fmt.Errorf("invalid transportAddress %s and transportServiceID %s for initiator %s", transportAddress, transportServiceID, i.Name)
+	}
+
+	if i.hostProc != "" {
+		lock, err := i.newLock()
+		if err != nil {
+			return err
+		}
+		defer lock.Unlock()
+	}
+
+	return i.ensureNVMeTCPPathWithoutLock(transportAddress, transportServiceID)
+}
+
 // DisconnectNVMeTCPTarget disconnects a target
 func (i *Initiator) DisconnectNVMeTCPTarget() error {
 	if i.NVMeTCPInfo == nil {
@@ -186,6 +242,10 @@ func (i *Initiator) DisconnectNVMeTCPTarget() error {
 	}
 
 	return DisconnectTarget(i.NVMeTCPInfo.SubsystemNQN, i.executor)
+}
+
+func (i *Initiator) connectNVMeTCPPathWithoutLock(transportAddress, transportServiceID string) error {
+	return i.ensureNVMeTCPPathWithoutLock(transportAddress, transportServiceID)
 }
 
 // WaitForNVMeTCPConnect waits for the NVMe/TCP initiator to connect and load the device info
@@ -387,25 +447,22 @@ func (i *Initiator) StartNvmeTCPInitiator(transportAddress, transportServiceID s
 		defer lock.Unlock()
 	}
 
-	// Check if the initiator/NVMe/TCP device is already launched and matches the params
-	err = i.loadNVMeDeviceInfoWithoutLock(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, i.NVMeTCPInfo.SubsystemNQN)
-	if err == nil {
-		if i.NVMeTCPInfo.TransportAddress == transportAddress && i.NVMeTCPInfo.TransportServiceID == transportServiceID {
+	// Check if the initiator/NVMe/TCP device is already launched and matches the params.
+	if launched, err := i.reuseExistingNVMeTCPPathWithoutLock(transportAddress, transportServiceID); err == nil {
+		if launched {
 			err = i.LoadEndpointForNvmeTcpFrontend(false)
 			if err == nil {
 				i.logger.Info("NVMe/TCP initiator is already launched with correct params")
-
-				// also load device source
-				err = i.waitAndLoadNVMeDeviceInfoWithoutLock(transportAddress, transportServiceID)
-				if err != nil {
-					i.logger.WithError(err).Warnf("Failed to load device info for NVMe/TCP initiator %s", i.Name)
-				}
 				return false, nil
 			}
 			i.logger.WithError(err).Warnf("NVMe/TCP initiator is launched with failed to load the endpoint")
-		} else {
-			i.logger.Warnf("NVMe/TCP initiator is launched but with incorrect address, the required one is %s:%s, will try to stop then relaunch it", transportAddress, transportServiceID)
 		}
+	} else {
+		i.logger.WithError(err).Warn("Failed to load existing NVMe/TCP path state before starting initiator")
+	}
+	if i.NVMeTCPInfo.TransportAddress != "" && i.NVMeTCPInfo.TransportServiceID != "" &&
+		(i.NVMeTCPInfo.TransportAddress != transportAddress || i.NVMeTCPInfo.TransportServiceID != transportServiceID) {
+		i.logger.Warnf("NVMe/TCP initiator is launched but with incorrect address, the required one is %s:%s, will try to stop then relaunch it", transportAddress, transportServiceID)
 	}
 
 	if stop {
@@ -418,19 +475,10 @@ func (i *Initiator) StartNvmeTCPInitiator(transportAddress, transportServiceID s
 		dmDeviceIsBusy = true
 	}
 
-	i.logger.Info("Discovering and connecting NVMe/TCP target")
-	subsystemNQN, controllerName, err := i.discoverAndConnectNVMeTCPTarget(transportAddress, transportServiceID, maxConnectTargetRetries, retryConnectTargetInterval)
+	i.logger.Info("Ensuring NVMe/TCP target path is connected")
+	err = i.ensureNVMeTCPPathWithoutLock(transportAddress, transportServiceID)
 	if err != nil {
-		return dmDeviceIsBusy, errors.Wrapf(err, "failed to discover and connect NVMe/TCP target %s:%s", transportAddress, transportServiceID)
-	}
-	if err := i.recordConnectedNVMeTCPInfo(subsystemNQN, controllerName); err != nil {
-		return dmDeviceIsBusy, errors.Wrapf(err, "invalid connected NVMe/TCP target state %s:%s", transportAddress, transportServiceID)
-	}
-
-	i.logger.Info("Loading NVMe/TCP initiator device info")
-	err = i.waitAndLoadNVMeDeviceInfoWithoutLock(transportAddress, transportServiceID)
-	if err != nil {
-		return dmDeviceIsBusy, errors.Wrapf(err, "failed to load device info after connecting target for NVMe/TCP initiator %s", i.Name)
+		return dmDeviceIsBusy, errors.Wrapf(err, "failed to ensure device info after connecting target for NVMe/TCP initiator %s", i.Name)
 	}
 
 	if dmDeviceAndEndpointCleanupRequired {
@@ -637,6 +685,50 @@ func (i *Initiator) waitAndLoadNVMeDeviceInfoWithoutLock(transportAddress, trans
 	return nil
 }
 
+func (i *Initiator) reuseExistingNVMeTCPPathWithoutLock(transportAddress, transportServiceID string) (bool, error) {
+	if err := i.loadNVMeDeviceInfoWithoutLock(i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID, i.NVMeTCPInfo.SubsystemNQN); err != nil {
+		return false, err
+	}
+	if i.NVMeTCPInfo.TransportAddress != transportAddress || i.NVMeTCPInfo.TransportServiceID != transportServiceID {
+		return false, nil
+	}
+
+	i.logger.WithFields(logrus.Fields{
+		"transportAddress":   transportAddress,
+		"transportServiceID": transportServiceID,
+	}).Info("NVMe/TCP path is already connected")
+
+	if err := i.waitAndLoadNVMeDeviceInfoWithoutLock(transportAddress, transportServiceID); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (i *Initiator) ensureNVMeTCPPathWithoutLock(transportAddress, transportServiceID string) error {
+	if reused, err := i.reuseExistingNVMeTCPPathWithoutLock(transportAddress, transportServiceID); err == nil {
+		if reused {
+			return nil
+		}
+	}
+
+	previousInfo := *i.NVMeTCPInfo
+	subsystemNQN, controllerName, err := i.discoverAndConnectNVMeTCPTarget(transportAddress, transportServiceID, maxConnectTargetRetries, retryConnectTargetInterval)
+	if err != nil {
+		return err
+	}
+	if err := i.recordConnectedNVMeTCPInfo(subsystemNQN, controllerName); err != nil {
+		*i.NVMeTCPInfo = previousInfo
+		return err
+	}
+	if err := i.waitAndLoadNVMeDeviceInfoWithoutLock(transportAddress, transportServiceID); err != nil {
+		*i.NVMeTCPInfo = previousInfo
+		return err
+	}
+
+	return nil
+}
+
 func (i *Initiator) recordConnectedNVMeTCPInfo(subsystemNQN, controllerName string) error {
 	if i.NVMeTCPInfo == nil {
 		return fmt.Errorf("nvmeTCPInfo is nil")
@@ -832,13 +924,14 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 	if len(nvmeDevices[0].Namespaces) != 1 {
 		return fmt.Errorf("found zero or multiple devices for NVMe/TCP initiator %s", i.Name)
 	}
-	if i.NVMeTCPInfo.ControllerName != "" && i.NVMeTCPInfo.ControllerName != nvmeDevices[0].Controllers[0].Controller {
-		return fmt.Errorf("found mismatching between the detected controller name %s and the recorded value %s for NVMe/TCP initiator %s", nvmeDevices[0].Controllers[0].Controller, i.NVMeTCPInfo.ControllerName, i.Name)
+	controller, err := selectControllerForNVMeDevice(nvmeDevices[0], transportAddress, transportServiceID, i.NVMeTCPInfo.ControllerName)
+	if err != nil {
+		return errors.Wrapf(err, "failed to select controller for NVMe/TCP initiator %s", i.Name)
 	}
 
-	i.NVMeTCPInfo.ControllerName = nvmeDevices[0].Controllers[0].Controller
+	i.NVMeTCPInfo.ControllerName = controller.Controller
 	i.NVMeTCPInfo.NamespaceName = nvmeDevices[0].Namespaces[0].NameSpace
-	i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID = GetIPAndPortFromControllerAddress(nvmeDevices[0].Controllers[0].Address)
+	i.NVMeTCPInfo.TransportAddress, i.NVMeTCPInfo.TransportServiceID = GetIPAndPortFromControllerAddress(controller.Address)
 	i.logger = i.logger.WithFields(logrus.Fields{
 		"controllerName":     i.NVMeTCPInfo.ControllerName,
 		"namespaceName":      i.NVMeTCPInfo.NamespaceName,
@@ -856,6 +949,31 @@ func (i *Initiator) loadNVMeDeviceInfoWithoutLock(transportAddress, transportSer
 		Source: *dev,
 	}
 	return nil
+}
+
+func selectControllerForNVMeDevice(device Device, transportAddress, transportServiceID, recordedControllerName string) (Controller, error) {
+	if len(device.Controllers) == 0 {
+		return Controller{}, fmt.Errorf("no NVMe controllers found for subsystem %s", device.SubsystemNQN)
+	}
+
+	if transportAddress != "" && transportServiceID != "" {
+		for _, controller := range device.Controllers {
+			controllerAddress, controllerServiceID := GetIPAndPortFromControllerAddress(controller.Address)
+			if controllerAddress == transportAddress && controllerServiceID == transportServiceID {
+				return controller, nil
+			}
+		}
+	}
+
+	if recordedControllerName != "" {
+		for _, controller := range device.Controllers {
+			if controller.Controller == recordedControllerName {
+				return controller, nil
+			}
+		}
+	}
+
+	return device.Controllers[0], nil
 }
 
 func (i *Initiator) isNamespaceExist(devices []string) bool {

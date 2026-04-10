@@ -45,6 +45,19 @@ type NvmeTcpTarget struct {
 	Nguid string
 }
 
+func toSPDKListenerANAState(anaState NvmeTCPANAState) (spdktypes.NvmfSubsystemListenerAnaState, error) {
+	switch anaState {
+	case NvmeTCPANAStateOptimized:
+		return spdktypes.NvmfSubsystemListenerAnaStateOptimized, nil
+	case NvmeTCPANAStateNonOptimized:
+		return spdktypes.NvmfSubsystemListenerAnaStateNonOptimized, nil
+	case NvmeTCPANAStateInaccessible:
+		return spdktypes.NvmfSubsystemListenerAnaStateInaccessible, nil
+	default:
+		return "", fmt.Errorf("unsupported NVMe/TCP ANA state %q", anaState)
+	}
+}
+
 // ReplicaAdder abstracts the two pluggable steps of the replica-add flow:
 // shallow copy and finish. Production code uses realReplicaAdder; tests
 // can supply a MockReplicaAdder via Engine.SetReplicaAdder().
@@ -311,8 +324,8 @@ func (e *Engine) createNVMeTCPTarget(spdkClient *spdkclient.Client, superiorPort
 
 	e.NvmeTcpTarget.IP = podIP
 	e.NvmeTcpTarget.Port = port
-	e.NvmeTcpTarget.Nguid = generateNGUID(e.Name)
-	e.NvmeTcpTarget.Nqn = helpertypes.GetNQN(e.Name)
+	e.NvmeTcpTarget.Nqn = getStableVolumeNQN(e.VolumeName)
+	e.NvmeTcpTarget.Nguid = getStableVolumeNGUID(e.VolumeName)
 
 	e.log.Info("Blindly stopping expose RAID bdev for engine")
 	if err := spdkClient.StopExposeBdev(e.NvmeTcpTarget.Nqn); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
@@ -327,6 +340,47 @@ func (e *Engine) createNVMeTCPTarget(spdkClient *spdkclient.Client, superiorPort
 		// when the user cleans up this engine.
 		return errors.Wrapf(err, "failed to start exposing RAID bdev for engine target %v", e.Name)
 	}
+
+	return nil
+}
+
+func (e *Engine) SetTargetListenerANAState(spdkClient *spdkclient.Client, anaState NvmeTCPANAState) error {
+	if e == nil {
+		return fmt.Errorf("engine is nil")
+	}
+	if spdkClient == nil {
+		return fmt.Errorf("SPDK client is nil for engine %s", e.Name)
+	}
+	if e.NvmeTcpTarget == nil {
+		return fmt.Errorf("engine %s does not have an NVMe/TCP target", e.Name)
+	}
+	if e.NvmeTcpTarget.Nqn == "" || e.NvmeTcpTarget.IP == "" || e.NvmeTcpTarget.Port == 0 {
+		return fmt.Errorf("engine %s has incomplete NVMe/TCP target information", e.Name)
+	}
+
+	spdkANAState, err := toSPDKListenerANAState(anaState)
+	if err != nil {
+		return err
+	}
+
+	_, err = spdkClient.NvmfSubsystemListenerSetANAState(
+		e.NvmeTcpTarget.Nqn,
+		e.NvmeTcpTarget.IP,
+		strconv.Itoa(int(e.NvmeTcpTarget.Port)),
+		spdktypes.NvmeTransportTypeTCP,
+		spdktypes.NvmeAddressFamilyIPv4,
+		spdkANAState,
+		spdktypes.DefaultNvmfANAGroupID,
+	)
+	if err != nil {
+		return errors.Wrapf(err, "failed to set target listener ANA state %s for engine %s", anaState, e.Name)
+	}
+
+	e.log.WithFields(logrus.Fields{
+		"targetIP":   e.NvmeTcpTarget.IP,
+		"targetPort": e.NvmeTcpTarget.Port,
+		"anaState":   anaState,
+	}).Info("Updated engine target listener ANA state")
 
 	return nil
 }

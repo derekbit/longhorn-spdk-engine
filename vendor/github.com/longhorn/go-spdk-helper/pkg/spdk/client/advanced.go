@@ -85,6 +85,12 @@ func (c *Client) StartExposeBdev(nqn, bdevName, nguid, ip, port string) error {
 		return err
 	}
 
+	logrus.Infof("Setting listener ANA state to %v for subsystem with nqn %v", spdktypes.NvmfSubsystemListenerAnaStateOptimized, nqn)
+	if _, err := c.NvmfSubsystemListenerSetANAState(nqn, ip, port, spdktypes.NvmeTransportTypeTCP,
+		spdktypes.NvmeAddressFamilyIPv4, spdktypes.NvmfSubsystemListenerAnaStateOptimized, spdktypes.DefaultNvmfANAGroupID); err != nil {
+		return err
+	}
+
 	return nil
 }
 
