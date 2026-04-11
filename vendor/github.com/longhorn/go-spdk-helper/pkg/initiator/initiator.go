@@ -244,8 +244,38 @@ func (i *Initiator) DisconnectNVMeTCPTarget() error {
 	return DisconnectTarget(i.NVMeTCPInfo.SubsystemNQN, i.executor)
 }
 
+// DisconnectNVMeTCPPathByAddress disconnects a single NVMe controller that
+// matches the given IP and port. This removes one multipath path without
+// affecting other controllers for the same subsystem NQN.
+func (i *Initiator) DisconnectNVMeTCPPathByAddress(ip, port string) error {
+	if i.NVMeTCPInfo == nil {
+		return fmt.Errorf("failed to DisconnectNVMeTCPPathByAddress because nvmeTCPInfo is nil")
+	}
+	if i.hostProc != "" {
+		lock, err := i.newLock()
+		if err != nil {
+			return err
+		}
+		defer lock.Unlock()
+	}
+
+	return DisconnectControllerByAddress(i.NVMeTCPInfo.SubsystemNQN, ip, port, i.executor)
+}
+
 func (i *Initiator) connectNVMeTCPPathWithoutLock(transportAddress, transportServiceID string) error {
-	return i.ensureNVMeTCPPathWithoutLock(transportAddress, transportServiceID)
+	if reused, err := i.reuseExistingNVMeTCPPathWithoutLock(transportAddress, transportServiceID); err == nil {
+		if reused {
+			return nil
+		}
+	}
+
+	// For switchover flows the caller may intentionally keep the newly
+	// connected path in ANA inaccessible state until after control-plane
+	// coordination completes. In that window the kernel may not expose the
+	// new path as the selected namespace device yet, so we only establish the
+	// connection here and defer device-info reload to the caller.
+	_, _, err := i.discoverAndConnectNVMeTCPTarget(transportAddress, transportServiceID, maxConnectTargetRetries, retryConnectTargetInterval)
+	return err
 }
 
 // WaitForNVMeTCPConnect waits for the NVMe/TCP initiator to connect and load the device info
@@ -766,7 +796,14 @@ func (i *Initiator) discoverAndConnectNVMeTCPTarget(transportAddress, transportS
 			i.logger.Infof("Connecting to NVMe/TCP target %s:%s with subsystemNQN %s", transportAddress, transportServiceID, subsystemNQN)
 			controllerName, e = ConnectTarget(transportAddress, transportServiceID, subsystemNQN, i.executor)
 			if e != nil {
-				return errors.Wrapf(e, "connect NVMe/TCP target %s:%s (nqn=%s) failed", transportAddress, transportServiceID, subsystemNQN)
+				connectErr := errors.Wrapf(e, "connect NVMe/TCP target %s:%s (nqn=%s) failed", transportAddress, transportServiceID, subsystemNQN)
+				// "already connected" is a permanent condition that will not
+				// resolve with retries. Return immediately so the caller can
+				// handle it (e.g. reload initiator state for multipath).
+				if strings.Contains(strings.ToLower(e.Error()), "already connected") {
+					return retry.Unrecoverable(connectErr)
+				}
+				return connectErr
 			}
 
 			return nil
@@ -895,6 +932,51 @@ func (i *Initiator) GetEndpoint() string {
 		return i.Endpoint
 	}
 	return ""
+}
+
+// WaitForControllerLive waits for the NVMe controller at the given address to
+// reach "live" state. This is needed after nvme connect which returns
+// immediately while the TCP handshake completes asynchronously.
+func (i *Initiator) WaitForControllerLive(transportAddress, transportServiceID string, maxAttempts int, retryInterval time.Duration) error {
+	if i.NVMeTCPInfo == nil {
+		return fmt.Errorf("nvmeTCPInfo is nil")
+	}
+
+	nqn := i.NVMeTCPInfo.SubsystemNQN
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		subsystems, err := GetSubsystems(i.executor)
+		if err != nil {
+			i.logger.WithError(err).Warn("Failed to list subsystems while waiting for controller live state")
+			if attempt < maxAttempts {
+				time.Sleep(retryInterval)
+			}
+			continue
+		}
+
+		for _, sys := range subsystems {
+			if sys.NQN != nqn {
+				continue
+			}
+			for _, path := range sys.Paths {
+				controllerIP, controllerPort := GetIPAndPortFromControllerAddress(path.Address)
+				if controllerIP == transportAddress && controllerPort == transportServiceID {
+					if path.State == "live" {
+						i.logger.Infof("NVMe controller %s for %s:%s reached live state after %d attempt(s)",
+							path.Name, transportAddress, transportServiceID, attempt)
+						return nil
+					}
+				}
+			}
+		}
+
+		if attempt < maxAttempts {
+			time.Sleep(retryInterval)
+		}
+	}
+
+	return fmt.Errorf("timed out waiting for NVMe controller to become live for %s:%s after %d attempts",
+		transportAddress, transportServiceID, maxAttempts)
 }
 
 // GetDevice returns the device information

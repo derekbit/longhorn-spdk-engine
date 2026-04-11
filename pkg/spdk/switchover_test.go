@@ -24,6 +24,7 @@ func stubSwitchoverANASync(ef *EngineFrontend, err error) {
 	ef.setRemoteEngineTargetANAStateFn = func(engineIP, engineName string, anaState NvmeTCPANAState) error {
 		return err
 	}
+	ef.disconnectOldNvmeTCPPathFn = func(oldTargetIP, oldTargetPort string) {}
 }
 
 func (s *TestSuite) TestEngineFrontendSwitchOverTargetNvmfSuccess(c *C) {
@@ -81,6 +82,15 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevRunningUsesMultipa
 	ef.syncCurrentNVMeTCPPathLocked()
 	ef.initiator = &initiator.Initiator{Endpoint: ef.Endpoint, NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
 	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
+	ef.loadInitiatorNVMeDeviceInfoFn = func(transportAddress, transportServiceID, subsystemNQN string) error {
+		c.Assert(transportAddress, Equals, "10.0.0.2")
+		c.Assert(transportServiceID, Equals, "3000")
+		c.Assert(subsystemNQN, Equals, getStableVolumeNQN("vol-a"))
+		return nil
+	}
+	ef.loadInitiatorEndpointFn = func(dmDeviceIsBusy bool) error {
+		return nil
+	}
 
 	called := false
 	stubSwitchoverANASync(ef, nil)
@@ -544,6 +554,13 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevCreatesInitiatorFo
 		}
 		return nil
 	}
+	ef.loadInitiatorNVMeDeviceInfoFn = func(transportAddress, transportServiceID, subsystemNQN string) error {
+		return nil
+	}
+	ef.loadInitiatorEndpointFn = func(dmDeviceIsBusy bool) error {
+		return nil
+	}
+	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
 
 	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, IsNil)
@@ -620,6 +637,74 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevAlreadyConnectedRe
 	}
 }
 
+func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevReloadsInitiatorStateAfterANASync(c *C) {
+	fmt.Println("Testing EngineFrontend.SwitchOverTarget for SPDK TCP Blockdev frontend reloads initiator state after ANA sync")
+
+	updateCh := make(chan interface{}, 1)
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, updateCh)
+	ef.State = lhtypes.InstanceStateRunning
+	ef.EngineIP = "10.0.0.1"
+	ef.NvmeTcpFrontend.TargetIP = "10.0.0.1"
+	ef.NvmeTcpFrontend.TargetPort = 2000
+	ef.NvmeTcpFrontend.Nqn = getStableVolumeNQN("vol-a")
+	ef.NvmeTcpFrontend.Nguid = getStableVolumeNGUID("vol-a")
+	ef.Endpoint = "/dev/longhorn/vol-a"
+	ef.dmDeviceIsBusy = true
+	ef.syncCurrentNVMeTCPPathLocked()
+	ef.initiator = &initiator.Initiator{Endpoint: ef.Endpoint, NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
+
+	connectCalled := false
+	anaSyncCalled := false
+	deviceReloaded := false
+	endpointReloaded := false
+	ef.connectNvmeTCPPathFn = func(transportAddress, transportServiceID string) error {
+		connectCalled = true
+		c.Assert(transportAddress, Equals, "10.0.0.2")
+		c.Assert(transportServiceID, Equals, "3000")
+		return nil
+	}
+	ef.syncRemoteEngineTargetANAStatesFn = func(oldEngineIP, oldEngineName, newEngineIP, newEngineName string) error {
+		anaSyncCalled = true
+		c.Assert(oldEngineIP, Equals, "10.0.0.1")
+		c.Assert(newEngineIP, Equals, "10.0.0.2")
+		return nil
+	}
+	ef.setRemoteEngineTargetANAStateFn = func(engineIP, engineName string, anaState NvmeTCPANAState) error {
+		return nil
+	}
+	ef.loadInitiatorNVMeDeviceInfoFn = func(transportAddress, transportServiceID, subsystemNQN string) error {
+		deviceReloaded = true
+		c.Assert(transportAddress, Equals, "10.0.0.2")
+		c.Assert(transportServiceID, Equals, "3000")
+		c.Assert(subsystemNQN, Equals, getStableVolumeNQN("vol-a"))
+		return nil
+	}
+	ef.loadInitiatorEndpointFn = func(dmDeviceIsBusy bool) error {
+		endpointReloaded = true
+		c.Assert(dmDeviceIsBusy, Equals, true)
+		return nil
+	}
+	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
+	ef.disconnectOldNvmeTCPPathFn = func(oldTargetIP, oldTargetPort string) {}
+
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
+	c.Assert(err, IsNil)
+	c.Assert(connectCalled, Equals, true)
+	c.Assert(anaSyncCalled, Equals, true)
+	c.Assert(deviceReloaded, Equals, true)
+	c.Assert(endpointReloaded, Equals, true)
+	c.Assert(ef.EngineName, Equals, "engine-b")
+	c.Assert(ef.EngineIP, Equals, "10.0.0.2")
+	c.Assert(ef.NvmeTcpFrontend.TargetIP, Equals, "10.0.0.2")
+	c.Assert(ef.NvmeTcpFrontend.TargetPort, Equals, int32(3000))
+
+	select {
+	case <-updateCh:
+	default:
+		c.Fatal("expected update notification after blockdev switchover")
+	}
+}
+
 func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevInProgressGuard(c *C) {
 	fmt.Println("Testing EngineFrontend.SwitchOverTarget in-progress guard for SPDK TCP Blockdev frontend")
 
@@ -634,6 +719,12 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevInProgressGuard(c 
 	ef.initiator = &initiator.Initiator{NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
 	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
 	stubSwitchoverANASync(ef, nil)
+	ef.loadInitiatorNVMeDeviceInfoFn = func(transportAddress, transportServiceID, subsystemNQN string) error {
+		return nil
+	}
+	ef.loadInitiatorEndpointFn = func(dmDeviceIsBusy bool) error {
+		return nil
+	}
 
 	enteredCh := make(chan struct{}, 1)
 	releaseCh := make(chan struct{})
@@ -694,6 +785,12 @@ func (s *TestSuite) TestEngineFrontendDeleteRejectedDuringSwitchOver(c *C) {
 	ef.initiator = &initiator.Initiator{NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: ef.NvmeTcpFrontend.Nqn}}
 	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
 	stubSwitchoverANASync(ef, nil)
+	ef.loadInitiatorNVMeDeviceInfoFn = func(transportAddress, transportServiceID, subsystemNQN string) error {
+		return nil
+	}
+	ef.loadInitiatorEndpointFn = func(dmDeviceIsBusy bool) error {
+		return nil
+	}
 
 	enteredCh := make(chan struct{}, 1)
 	releaseCh := make(chan struct{})
@@ -891,4 +988,51 @@ func (s *TestSuite) TestIsInitiatorCreationRequiredNilNvmeTcpFrontendReturnsErro
 	_, err := ef.isInitiatorCreationRequired("10.0.0.1")
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "invalid NvmeTcpFrontend"), Equals, true)
+}
+
+func (s *TestSuite) TestSyncRemoteEngineTargetANAStatesSubsystemNotFoundIsNonFatal(c *C) {
+	fmt.Println("Testing syncRemoteEngineTargetANAStates treats old engine subsystem-not-found as success")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+
+	var calls []string
+	ef.setRemoteEngineTargetANAStateFn = func(engineIP, engineName string, anaState NvmeTCPANAState) error {
+		calls = append(calls, engineName+":"+string(anaState))
+		if engineName == "engine-a" && anaState == NvmeTCPANAStateInaccessible {
+			return fmt.Errorf("failed to set ANA state: Unable to find subsystem with NQN xyz")
+		}
+		return nil
+	}
+
+	err := ef.syncRemoteEngineTargetANAStates("10.0.0.1", "engine-a", "10.0.0.2", "engine-b")
+	c.Assert(err, IsNil)
+	c.Assert(len(calls), Equals, 2)
+	c.Assert(calls[0], Equals, "engine-b:optimized")
+	c.Assert(calls[1], Equals, "engine-a:inaccessible")
+}
+
+func (s *TestSuite) TestSyncRemoteEngineTargetANAStatesOtherErrorStillFails(c *C) {
+	fmt.Println("Testing syncRemoteEngineTargetANAStates propagates non-subsystem errors on old engine")
+
+	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPBlockdev, 1024, 0, 0, make(chan interface{}, 1))
+
+	ef.setRemoteEngineTargetANAStateFn = func(engineIP, engineName string, anaState NvmeTCPANAState) error {
+		if engineName == "engine-a" && anaState == NvmeTCPANAStateInaccessible {
+			return fmt.Errorf("connection refused")
+		}
+		return nil
+	}
+
+	err := ef.syncRemoteEngineTargetANAStates("10.0.0.1", "engine-a", "10.0.0.2", "engine-b")
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "connection refused"), Equals, true)
+}
+
+func (s *TestSuite) TestIsSubsystemNotFoundError(c *C) {
+	fmt.Println("Testing isSubsystemNotFoundError")
+
+	c.Assert(isSubsystemNotFoundError(nil), Equals, false)
+	c.Assert(isSubsystemNotFoundError(fmt.Errorf("Unable to find subsystem with NQN xyz")), Equals, true)
+	c.Assert(isSubsystemNotFoundError(fmt.Errorf("something else: unable to find subsystem with NQN abc")), Equals, true)
+	c.Assert(isSubsystemNotFoundError(fmt.Errorf("connection refused")), Equals, false)
 }

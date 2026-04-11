@@ -1150,11 +1150,17 @@ func (c *Client) NvmfGetTransports(trtype spdktypes.NvmeTransportType, tgtName s
 // NvmfCreateSubsystem constructs an NVMe over Fabrics target subsystem..
 //
 //	"nqn": Required. Subsystem NQN.
-func (c *Client) NvmfCreateSubsystem(nqn string) (created bool, err error) {
+func (c *Client) NvmfCreateSubsystem(nqn string, minCntlid, maxCntlid uint16) (created bool, err error) {
 	req := spdktypes.NvmfCreateSubsystemRequest{
 		Nqn:          nqn,
 		AllowAnyHost: true,
 		AnaReporting: true,
+	}
+	if minCntlid > 0 {
+		req.MinCntlid = minCntlid
+	}
+	if maxCntlid > 0 {
+		req.MaxCntlid = maxCntlid
 	}
 
 	cmdOutput, err := c.jsonCli.SendCommand("nvmf_create_subsystem", req)
@@ -1210,12 +1216,13 @@ func (c *Client) NvmfGetSubsystems(nqn, tgtName string) (subsystemList []spdktyp
 //	"bdevName": Required. Name of bdev to expose as a namespace.
 //
 //	"nguid": Optional. Namespace globally unique identifier.
-func (c *Client) NvmfSubsystemAddNs(nqn, bdevName, nguid string) (nsid uint32, err error) {
+func (c *Client) NvmfSubsystemAddNs(nqn, bdevName, nguid, nsUUID string) (nsid uint32, err error) {
 	req := spdktypes.NvmfSubsystemAddNsRequest{
 		Nqn: nqn,
 		Namespace: spdktypes.NvmfSubsystemNamespace{
 			BdevName: bdevName,
 			Nguid:    nguid,
+			UUID:     nsUUID,
 		},
 	}
 
