@@ -932,6 +932,7 @@ func (s *Server) recoverEngineFrontends() {
 					TargetIP:   path.TargetIP,
 					TargetPort: path.TargetPort,
 					EngineName: path.EngineName,
+					EngineIP:   path.EngineIP,
 					Nqn:        path.Nqn,
 					Nguid:      path.Nguid,
 					ANAState:   path.ANAState,
@@ -941,7 +942,9 @@ func (s *Server) recoverEngineFrontends() {
 		if ef.NvmeTcpFrontend != nil {
 			if record.TargetIP != "" {
 				ef.NvmeTcpFrontend.TargetIP = record.TargetIP
-				ef.EngineIP = record.TargetIP
+				if ef.EngineIP == "" {
+					ef.EngineIP = record.TargetIP
+				}
 			}
 			if record.TargetPort != 0 {
 				ef.NvmeTcpFrontend.TargetPort = record.TargetPort

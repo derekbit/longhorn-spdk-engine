@@ -294,7 +294,7 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 	switch e.Frontend {
 	case types.FrontendSPDKTCPBlockdev, types.FrontendSPDKTCPNvmf:
 		e.log.Infof("Creating NVMe TCP target for engine %v", e.Name)
-		if err := e.createNVMeTCPTarget(spdkClient, superiorPortAllocator, portCount); err != nil {
+		if err := e.createNVMeTCPTarget(spdkClient, superiorPortAllocator, portCount, NvmeTCPANAStateOptimized); err != nil {
 			return nil, errors.Wrapf(err, "failed to create NVMe TCP target for engine %v", e.Name)
 		}
 	case types.FrontendUBLK:
@@ -311,7 +311,13 @@ func (e *Engine) Create(spdkClient *spdkclient.Client, replicaAddressMap map[str
 	return e.getWithoutLock(), nil
 }
 
-func (e *Engine) createNVMeTCPTarget(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, portCount int32) error {
+// createNVMeTCPTarget creates the NVMe/TCP target for this engine.
+// initialANAState controls the ANA state the listener is created with.
+// Normal (first-time) engine creation should use NvmeTCPANAStateOptimized.
+// Migration/switchover targets should use NvmeTCPANAStateInaccessible so the
+// kernel multipath layer does not route I/O to the new path until explicitly
+// promoted.
+func (e *Engine) createNVMeTCPTarget(spdkClient *spdkclient.Client, superiorPortAllocator *commonbitmap.Bitmap, portCount int32, initialANAState NvmeTCPANAState) error {
 	podIP, err := commonnet.GetIPForPod()
 	if err != nil {
 		return err
@@ -327,14 +333,19 @@ func (e *Engine) createNVMeTCPTarget(spdkClient *spdkclient.Client, superiorPort
 	e.NvmeTcpTarget.Nqn = getStableVolumeNQN(e.VolumeName)
 	e.NvmeTcpTarget.Nguid = getStableVolumeNGUID(e.VolumeName)
 
+	spdkANAState, err := toSPDKListenerANAState(initialANAState)
+	if err != nil {
+		return errors.Wrapf(err, "invalid initial ANA state %q for engine target %v", initialANAState, e.Name)
+	}
+
 	e.log.Info("Blindly stopping expose RAID bdev for engine")
 	if err := spdkClient.StopExposeBdev(e.NvmeTcpTarget.Nqn); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
 		return errors.Wrapf(err, "failed to blindly stop exposing RAID bdev for engine target %v", e.Name)
 	}
 
-	e.log.Infof("Starting to expose RAID bdev for engine target %v on %v:%v", e.Name, e.NvmeTcpTarget.IP, e.NvmeTcpTarget.Port)
-	if err := spdkClient.StartExposeBdev(e.NvmeTcpTarget.Nqn, e.Name, e.NvmeTcpTarget.Nguid,
-		e.NvmeTcpTarget.IP, strconv.Itoa(int(e.NvmeTcpTarget.Port))); err != nil {
+	e.log.Infof("Starting to expose RAID bdev for engine target %v on %v:%v with initial ANA state %v", e.Name, e.NvmeTcpTarget.IP, e.NvmeTcpTarget.Port, initialANAState)
+	if err := spdkClient.StartExposeBdevWithANAState(e.NvmeTcpTarget.Nqn, e.Name, e.NvmeTcpTarget.Nguid,
+		e.NvmeTcpTarget.IP, strconv.Itoa(int(e.NvmeTcpTarget.Port)), spdkANAState); err != nil {
 		// No need to release ports here. The engine will be marked as ERR by
 		// Create's deferred error handler, and Delete will release the ports
 		// when the user cleans up this engine.
@@ -375,6 +386,13 @@ func (e *Engine) SetTargetListenerANAState(spdkClient *spdkclient.Client, anaSta
 	if err != nil {
 		return errors.Wrapf(err, "failed to set target listener ANA state %s for engine %s", anaState, e.Name)
 	}
+
+	// NOTE: We intentionally do NOT read back and verify the ANA state via
+	// NvmfSubsystemGetListeners. The SPDK nvmf_subsystem_get_listeners RPC
+	// does not always include the ana_state field in its response (it depends
+	// on the SPDK version and whether ANA reporting is enabled at the
+	// subsystem level). The nvmf_subsystem_listener_set_ana_state RPC returns
+	// true on success, which is sufficient confirmation.
 
 	e.log.WithFields(logrus.Fields{
 		"targetIP":   e.NvmeTcpTarget.IP,

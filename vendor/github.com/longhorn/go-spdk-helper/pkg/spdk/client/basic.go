@@ -1216,7 +1216,6 @@ func (c *Client) NvmfSubsystemAddNs(nqn, bdevName, nguid string) (nsid uint32, e
 		Namespace: spdktypes.NvmfSubsystemNamespace{
 			BdevName: bdevName,
 			Nguid:    nguid,
-			Anagrpid: spdktypes.NvmfANAGroupID(strconv.FormatUint(uint64(spdktypes.DefaultNvmfANAGroupID), 10)),
 		},
 	}
 

@@ -56,8 +56,17 @@ func (c *Client) DeleteDevice(bdevAioName, lvsName string) (err error) {
 }
 
 // StartExposeBdev exposes the bdev with the given nqn, bdevName, nguid, ip, and port.
+// The listener ANA state is set to "optimized" by default.
 func (c *Client) StartExposeBdev(nqn, bdevName, nguid, ip, port string) error {
-	logrus.Infof("Exposing bdev with nqn %v, bdevName %v, nguid %v, ip %v, port %v", nqn, bdevName, nguid, ip, port)
+	return c.StartExposeBdevWithANAState(nqn, bdevName, nguid, ip, port, spdktypes.NvmfSubsystemListenerAnaStateOptimized)
+}
+
+// StartExposeBdevWithANAState exposes the bdev with the given nqn, bdevName,
+// nguid, ip, port, and initial ANA state. Use this when the target must be
+// created with a non-default ANA state (e.g. "inaccessible" for switchover
+// migration targets that should not receive I/O until explicitly promoted).
+func (c *Client) StartExposeBdevWithANAState(nqn, bdevName, nguid, ip, port string, anaState spdktypes.NvmfSubsystemListenerAnaState) error {
+	logrus.Infof("Exposing bdev with nqn %v, bdevName %v, nguid %v, ip %v, port %v, anaState %v", nqn, bdevName, nguid, ip, port, anaState)
 
 	nvmfTransportList, err := c.NvmfGetTransports("", "")
 	if err != nil {
@@ -85,9 +94,9 @@ func (c *Client) StartExposeBdev(nqn, bdevName, nguid, ip, port string) error {
 		return err
 	}
 
-	logrus.Infof("Setting listener ANA state to %v for subsystem with nqn %v", spdktypes.NvmfSubsystemListenerAnaStateOptimized, nqn)
+	logrus.Infof("Setting listener ANA state to %v for subsystem with nqn %v", anaState, nqn)
 	if _, err := c.NvmfSubsystemListenerSetANAState(nqn, ip, port, spdktypes.NvmeTransportTypeTCP,
-		spdktypes.NvmeAddressFamilyIPv4, spdktypes.NvmfSubsystemListenerAnaStateOptimized, spdktypes.DefaultNvmfANAGroupID); err != nil {
+		spdktypes.NvmeAddressFamilyIPv4, anaState, spdktypes.DefaultNvmfANAGroupID); err != nil {
 		return err
 	}
 

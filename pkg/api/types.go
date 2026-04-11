@@ -197,6 +197,7 @@ type EngineFrontend struct {
 	Name                  string `json:"name"`
 	VolumeName            string `json:"volumeName"`
 	EngineName            string `json:"engine_name"`
+	EngineIP              string `json:"engine_ip"`
 	SpecSize              uint64 `json:"spec_size"`
 	ActualSize            uint64 `json:"actual_size"`
 	TargetIP              string `json:"target_ip"`
@@ -223,6 +224,7 @@ type EngineFrontendNvmeTCPPath struct {
 	NQN        string `json:"nqn"`
 	NGUID      string `json:"nguid"`
 	ANAState   string `json:"ana_state"`
+	EngineIP   string `json:"engine_ip"`
 }
 
 func ProtoEngineFrontendToEngineFrontend(ef *spdkrpc.EngineFrontend) *EngineFrontend {
@@ -230,6 +232,7 @@ func ProtoEngineFrontendToEngineFrontend(ef *spdkrpc.EngineFrontend) *EngineFron
 		Name:                  ef.Name,
 		VolumeName:            ef.VolumeName,
 		EngineName:            ef.EngineName,
+		EngineIP:              ef.EngineIp,
 		SpecSize:              ef.SpecSize,
 		ActualSize:            ef.ActualSize,
 		TargetIP:              ef.TargetIp,
@@ -260,6 +263,7 @@ func ProtoEngineFrontendToEngineFrontend(ef *spdkrpc.EngineFrontend) *EngineFron
 			NQN:        path.Nqn,
 			NGUID:      path.Nguid,
 			ANAState:   path.AnaState,
+			EngineIP:   path.EngineIp,
 		})
 	}
 

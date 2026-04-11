@@ -235,6 +235,7 @@ func (s *Server) EngineFrontendCreate(ctx context.Context, req *spdkrpc.EngineFr
 	ef := NewEngineFrontend(req.Name, req.EngineName, req.VolumeName, req.Frontend, req.SpecSize,
 		req.UblkQueueDepth, req.UblkNumberOfQueue, s.updateChs[types.InstanceTypeEngineFrontend])
 	ef.metadataDir = s.metadataDir
+	ef.EngineIP = req.EngineIp
 
 	spdkClient := s.spdkClient
 	s.Unlock()

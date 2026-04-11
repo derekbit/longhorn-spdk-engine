@@ -165,7 +165,7 @@ func (s *Server) EngineFrontendSwitchOver(ctx context.Context, req *spdkrpc.Engi
 		return nil, grpcstatus.Errorf(grpccodes.NotFound, "cannot find engine frontend or engine %v for target switchover", req.Name)
 	}
 
-	if err := ef.SwitchOverTarget(spdkClient, req.EngineName, req.TargetAddress); err != nil {
+	if err := ef.SwitchOverTarget(spdkClient, req.EngineName, req.TargetAddress, req.EngineIp); err != nil {
 		return nil, toSwitchOverGRPCError(err, "failed to switch over target for %s", req.Name)
 	}
 

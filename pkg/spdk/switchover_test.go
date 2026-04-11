@@ -21,6 +21,9 @@ func stubSwitchoverANASync(ef *EngineFrontend, err error) {
 	ef.syncRemoteEngineTargetANAStatesFn = func(oldEngineIP, oldEngineName, newEngineIP, newEngineName string) error {
 		return err
 	}
+	ef.setRemoteEngineTargetANAStateFn = func(engineIP, engineName string, anaState NvmeTCPANAState) error {
+		return err
+	}
 }
 
 func (s *TestSuite) TestEngineFrontendSwitchOverTargetNvmfSuccess(c *C) {
@@ -39,7 +42,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetNvmfSuccess(c *C) {
 	ef.syncCurrentNVMeTCPPathLocked()
 	stubSwitchoverANASync(ef, nil)
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, IsNil)
 	c.Assert(ef.EngineName, Equals, "engine-b")
 	c.Assert(ef.EngineIP, Equals, "10.0.0.2")
@@ -89,7 +92,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevRunningUsesMultipa
 		return nil
 	}
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, IsNil)
 	c.Assert(called, Equals, true)
 	c.Assert(ef.EngineName, Equals, "engine-b")
@@ -318,9 +321,39 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetResolveEngineNameFallback(
 	}
 	stubSwitchoverANASync(ef, nil)
 
-	err := ef.SwitchOverTarget(nil, "", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, IsNil)
 	c.Assert(ef.EngineName, Equals, "engine-c")
+}
+
+func (s *TestSuite) TestEngineFrontendSwitchOverTargetUsesPathMetadataForRemoteANASync(c *C) {
+	fmt.Println("Testing EngineFrontend.SwitchOverTarget resolves remote ANA sync metadata from path records")
+
+	ef := NewEngineFrontend("ef-a", "", "vol-a", lhtypes.FrontendSPDKTCPNvmf, 1024, 0, 0, make(chan interface{}, 1))
+	ef.State = lhtypes.InstanceStateRunning
+	ef.EngineIP = ""
+	ef.NvmeTcpFrontend.TargetIP = "10.0.0.1"
+	ef.NvmeTcpFrontend.TargetPort = 2000
+	ef.NvmeTcpFrontend.Nqn = getStableVolumeNQN("vol-a")
+	ef.NvmeTcpFrontend.Nguid = getStableVolumeNGUID("vol-a")
+	ef.Endpoint = GetNvmfEndpoint(ef.NvmeTcpFrontend.Nqn, ef.NvmeTcpFrontend.TargetIP, ef.NvmeTcpFrontend.TargetPort)
+	ef.upsertNVMeTCPPathLocked("10.0.0.1", 2000, "engine-a", "10.0.0.1", ef.NvmeTcpFrontend.Nqn, ef.NvmeTcpFrontend.Nguid, NvmeTCPANAStateOptimized)
+	ef.ActivePath = "10.0.0.1:2000"
+	ef.PreferredPath = "10.0.0.1:2000"
+
+	called := false
+	ef.syncRemoteEngineTargetANAStatesFn = func(oldEngineIP, oldEngineName, newEngineIP, newEngineName string) error {
+		called = true
+		c.Assert(oldEngineIP, Equals, "10.0.0.1")
+		c.Assert(oldEngineName, Equals, "engine-a")
+		c.Assert(newEngineIP, Equals, "10.0.0.2")
+		c.Assert(newEngineName, Equals, "engine-b")
+		return nil
+	}
+
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
+	c.Assert(err, IsNil)
+	c.Assert(called, Equals, true)
 }
 
 func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevNoOpWithoutSuspend(c *C) {
@@ -342,7 +375,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevNoOpWithoutSuspend
 		return "", fmt.Errorf("should not resolve engine name for no-op switchover")
 	}
 
-	err := ef.SwitchOverTarget(nil, "", "10.0.0.1:2000")
+	err := ef.SwitchOverTarget(nil, "", "10.0.0.1:2000", "10.0.0.1")
 	c.Assert(err, IsNil)
 	c.Assert(resolveCalled, Equals, false)
 
@@ -389,7 +422,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevConnectFailurePres
 		return fmt.Errorf("connect failed")
 	}
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "connect failed"), Equals, true)
 
@@ -446,7 +479,15 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevANASyncFailurePres
 		NVMeTCPInfo: &initiator.NVMeTCPInfo{SubsystemNQN: oldNQN},
 	}
 	ef.getInitiatorEndpointFn = func() string { return oldEndpoint }
-	stubSwitchoverANASync(ef, fmt.Errorf("ana sync failed"))
+	// Stub: the pre-connect ANA state setting (setRemoteEngineTargetANAStateFn)
+	// must succeed so that the multipath connect proceeds, but the post-connect
+	// ANA sync (syncRemoteEngineTargetANAStatesFn) will fail.
+	ef.setRemoteEngineTargetANAStateFn = func(engineIP, engineName string, anaState NvmeTCPANAState) error {
+		return nil
+	}
+	ef.syncRemoteEngineTargetANAStatesFn = func(oldEngineIP, oldEngineName, newEngineIP, newEngineName string) error {
+		return fmt.Errorf("ana sync failed")
+	}
 
 	var callTargets []string
 	ef.connectNvmeTCPPathFn = func(transportAddress, transportServiceID string) error {
@@ -454,7 +495,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevANASyncFailurePres
 		return nil
 	}
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "ana sync failed"), Equals, true)
 	c.Assert(len(callTargets), Equals, 1)
@@ -504,7 +545,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevCreatesInitiatorFo
 		return nil
 	}
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, IsNil)
 	c.Assert(connected, Equals, true)
 	c.Assert(ef.initiator, NotNil)
@@ -557,7 +598,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevAlreadyConnectedRe
 	ef.getInitiatorEndpointFn = func() string { return "/dev/longhorn/vol-a" }
 	stubSwitchoverANASync(ef, nil)
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, IsNil)
 	c.Assert(connectCalled, Equals, true)
 	c.Assert(deviceReloaded, Equals, true)
@@ -604,7 +645,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevInProgressGuard(c 
 
 	firstErrCh := make(chan error, 1)
 	go func() {
-		firstErrCh <- ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+			firstErrCh <- ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	}()
 
 	select {
@@ -626,7 +667,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetBlockdevInProgressGuard(c 
 	}
 
 	// Concurrent switchover should be rejected by the in-progress guard.
-	err := ef.SwitchOverTarget(nil, "engine-c", "10.0.0.3:3000")
+	err := ef.SwitchOverTarget(nil, "engine-c", "10.0.0.3:3000", "10.0.0.3")
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "already in progress"), Equals, true)
 
@@ -664,7 +705,7 @@ func (s *TestSuite) TestEngineFrontendDeleteRejectedDuringSwitchOver(c *C) {
 
 	switchErrCh := make(chan error, 1)
 	go func() {
-		switchErrCh <- ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+			switchErrCh <- ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	}()
 
 	select {
@@ -702,7 +743,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetRejectedDuringExpand(c *C)
 	ef.State = lhtypes.InstanceStateRunning
 	ef.isExpanding = true
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "expansion is in progress"), Equals, true)
 }
@@ -714,7 +755,7 @@ func (s *TestSuite) TestEngineFrontendSwitchOverTargetRejectedDuringRestore(c *C
 	ef.State = lhtypes.InstanceStateRunning
 	ef.IsRestoring = true
 
-	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000")
+	err := ef.SwitchOverTarget(nil, "engine-b", "10.0.0.2:3000", "10.0.0.2")
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "restore is in progress"), Equals, true)
 }
@@ -761,8 +802,8 @@ func (s *TestSuite) TestCreateUblkFrontendNilReturnsCorrectErrorField(c *C) {
 func (s *TestSuite) TestPromoteNVMeTCPPathLockedDemotesOldActivePath(c *C) {
 	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPNvmf, 1024, 0, 0, make(chan interface{}, 1))
 
-	oldAddress := ef.upsertNVMeTCPPathLocked("10.0.0.1", 2000, "engine-a", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateOptimized)
-	newAddress := ef.upsertNVMeTCPPathLocked("10.0.0.2", 3000, "engine-b", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateNonOptimized)
+	oldAddress := ef.upsertNVMeTCPPathLocked("10.0.0.1", 2000, "engine-a", "10.0.0.1", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateOptimized)
+	newAddress := ef.upsertNVMeTCPPathLocked("10.0.0.2", 3000, "engine-b", "10.0.0.2", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateNonOptimized)
 	ef.ActivePath = oldAddress
 	ef.PreferredPath = oldAddress
 
@@ -777,8 +818,8 @@ func (s *TestSuite) TestPromoteNVMeTCPPathLockedDemotesOldActivePath(c *C) {
 func (s *TestSuite) TestRemoveNVMeTCPPathLockedUpdatesSelectors(c *C) {
 	ef := NewEngineFrontend("ef-a", "engine-a", "vol-a", lhtypes.FrontendSPDKTCPNvmf, 1024, 0, 0, make(chan interface{}, 1))
 
-	firstAddress := ef.upsertNVMeTCPPathLocked("10.0.0.1", 2000, "engine-a", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateNonOptimized)
-	secondAddress := ef.upsertNVMeTCPPathLocked("10.0.0.2", 3000, "engine-b", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateOptimized)
+	firstAddress := ef.upsertNVMeTCPPathLocked("10.0.0.1", 2000, "engine-a", "10.0.0.1", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateNonOptimized)
+	secondAddress := ef.upsertNVMeTCPPathLocked("10.0.0.2", 3000, "engine-b", "10.0.0.2", getStableVolumeNQN("vol-a"), getStableVolumeNGUID("vol-a"), NvmeTCPANAStateOptimized)
 	ef.ActivePath = secondAddress
 	ef.PreferredPath = secondAddress
 

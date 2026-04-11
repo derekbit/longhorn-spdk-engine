@@ -40,6 +40,7 @@ type EngineFrontendPathRecord struct {
 	TargetIP   string          `json:"targetIP"`
 	TargetPort int32           `json:"targetPort"`
 	EngineName string          `json:"engineName,omitempty"`
+	EngineIP   string          `json:"engineIP,omitempty"`
 	Nqn        string          `json:"nqn,omitempty"`
 	Nguid      string          `json:"nguid,omitempty"`
 	ANAState   NvmeTCPANAState `json:"anaState,omitempty"`
@@ -94,6 +95,7 @@ func saveEngineFrontendRecord(metadataDir string, ef *EngineFrontend) error {
 			TargetIP:   path.TargetIP,
 			TargetPort: path.TargetPort,
 			EngineName: path.EngineName,
+			EngineIP:   path.EngineIP,
 			Nqn:        path.Nqn,
 			Nguid:      path.Nguid,
 			ANAState:   path.ANAState,
