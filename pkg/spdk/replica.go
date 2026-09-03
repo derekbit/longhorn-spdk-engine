@@ -47,7 +47,19 @@ const (
 
 	setParentRetryAttempts = 10
 	setParentRetryDelay    = 200 * time.Millisecond
+
+	// nvmfExposeSettleDelay pauses between unexposing an NQN and re-exposing it on the same
+	// IP:port during a rebuild, so SPDK finishes tearing down the previous NVMf listener before a
+	// new listener with the same trid is created.
+	nvmfExposeSettleDelay = 8 * time.Second
 )
+
+// waitForNvmfExposeSettle gives SPDK time to complete the asynchronous teardown of the NVMf
+// listener that was just removed from ip:port before the caller re-exposes a bdev on it.
+func (r *Replica) waitForNvmfExposeSettle(nqn string, port int32) {
+	r.log.Infof("Waiting %v for the NVMf listener teardown of %s on %s:%d to settle before re-exposing it", nvmfExposeSettleDelay, nqn, r.IP, port)
+	time.Sleep(nvmfExposeSettleDelay)
+}
 
 type Replica struct {
 	sync.RWMutex
@@ -3828,6 +3840,7 @@ func (r *Replica) RebuildingDstStart(spdkClient *spdkclient.Client, srcReplicaNa
 			return "", err
 		}
 		r.IsExposed = false
+		r.waitForNvmfExposeSettle(helpertypes.GetNQN(r.Name), r.PortStart)
 	}
 	// TODO: Uncomment below code after the RAID delta bitmap feature is ready
 	//// For the old head, if it's a non-empty one, rename it for reuse later.
@@ -4254,6 +4267,7 @@ func (r *Replica) rebuildingDstShallowCopyPrepare(spdkClient *spdkclient.Client,
 		if err := spdkClient.StopExposeBdev(helpertypes.GetNQN(rebuildingLvolName)); err != nil && !jsonrpc.IsJSONRPCRespErrorNoSuchDevice(err) {
 			return "", false, err
 		}
+		r.waitForNvmfExposeSettle(helpertypes.GetNQN(rebuildingLvolName), r.rebuildingDstCache.rebuildingPort)
 	}
 	if r.rebuildingDstCache.rebuildingLvol != nil {
 		r.log.Infof("Rebuilding dst replica %s deletes the existing rebuilding lvol %s(%s) for snapshot %s shallow copy prepare", r.Name, r.rebuildingDstCache.rebuildingLvol.Name, r.rebuildingDstCache.rebuildingLvol.UUID, snapshotName)
