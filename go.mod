@@ -10,7 +10,7 @@ require (
 	github.com/jinzhu/copier v0.4.0
 	github.com/longhorn/backupstore v0.0.0-20260831070834-77c184cc059a
 	github.com/longhorn/go-common-libs v0.0.0-20260907073218-e53e6775eb8a
-	github.com/longhorn/go-spdk-helper v0.9.1-0.20260907084552-730dfff4eda5
+	github.com/longhorn/go-spdk-helper v0.9.1-0.20260915001126-d4626fec96f4
 	github.com/longhorn/types v0.0.0-20260831072945-0bac432e7872
 	github.com/sirupsen/logrus v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -79,3 +79,5 @@ require (
 	k8s.io/mount-utils v0.31.3 // indirect
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
 )
+
+replace github.com/longhorn/go-spdk-helper => ../go-spdk-helper
