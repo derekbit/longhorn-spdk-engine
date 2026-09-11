@@ -2741,6 +2741,14 @@ func (e *Engine) waitForRestoreComplete() error {
 			if restoreState == btypes.ProgressStateCanceled {
 				return retrygo.Unrecoverable(fmt.Errorf("%v", btypes.ErrorMsgRestoreCancelled))
 			}
+			if restoreError != "" {
+				err := fmt.Errorf("%v", restoreError)
+				e.log.WithError(err).Error("Found backup restoration error")
+				return retrygo.Unrecoverable(err)
+			}
+			if restoreState == btypes.ProgressStateError {
+				return retrygo.Unrecoverable(fmt.Errorf("backup restoration failed without a recorded error"))
+			}
 			if restoreProgress == 100 {
 				e.log.Infof("Backup restore is done: %v%%", restoreProgress)
 				return nil
@@ -2751,12 +2759,6 @@ func (e *Engine) waitForRestoreComplete() error {
 				"state":        restoreState,
 				"snapshotName": e.RestoringSnapshotName,
 			}).Debug("Restore is still in progress")
-
-			if restoreError != "" {
-				err := fmt.Errorf("%v", restoreError)
-				e.log.WithError(err).Error("Found backup restoration error")
-				return retrygo.Unrecoverable(err)
-			}
 
 			return fmt.Errorf("restore is still in progress")
 		},

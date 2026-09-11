@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/longhorn/types/pkg/generated/spdkrpc"
 
 	helpertypes "github.com/longhorn/go-spdk-helper/pkg/types"
@@ -149,7 +148,6 @@ func (s *TestSuite) TestEngineFrontendFinishExpansionPartialFailureKeepsOriginal
 	c.Assert(ef.lastExpansionFailedAt, Equals, "2026-03-10T00:00:00Z")
 	c.Assert(ef.isExpanding, Equals, false)
 }
-
 func (s *TestSuite) TestEngineFrontendRequireExpansionGuards(c *C) {
 	fmt.Println("Testing EngineFrontend require expansion guards")
 

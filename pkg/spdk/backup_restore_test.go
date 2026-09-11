@@ -3,8 +3,11 @@ package spdk
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
+
+	btypes "github.com/longhorn/backupstore/types"
 
 	"github.com/longhorn/longhorn-spdk-engine/pkg/api"
 	lhtypes "github.com/longhorn/longhorn-spdk-engine/pkg/types"
@@ -266,4 +269,48 @@ func (s *TestSuite) TestResolveReplicaAncestorMarksERROnBackingImageError(c *C) 
 	_, _, _, ok := e.resolveReplicaAncestor("r1", view, u, false, false)
 	c.Assert(ok, Equals, false)
 	c.Assert(u.Mode(), Equals, lhtypes.Mode(lhtypes.ModeERR))
+}
+
+func (s *TestSuite) TestEngineRestoreCloseVolumeDevSyncFailureFailsRestore(c *C) {
+	fmt.Println("Testing EngineRestore reports a failed device sync as a failed restore")
+
+	volDev, err := os.CreateTemp(c.MkDir(), "restore-dev")
+	c.Assert(err, IsNil)
+	c.Assert(volDev.Close(), IsNil)
+
+	r := NewEngineRestore(nil, "s3://backupbucket@us-east-1/backupstore?backup=backup-2", "backup-2", nil, nil)
+	r.Progress = 100
+
+	c.Assert(r.CloseVolumeDev(volDev), NotNil)
+
+	c.Assert(r.State, Equals, btypes.ProgressStateError)
+	c.Assert(r.Error, Not(Equals), "")
+
+	r.FinishRestore()
+	c.Assert(r.State, Equals, btypes.ProgressStateError)
+	c.Assert(r.LastRestored, Equals, "")
+}
+
+func (s *TestSuite) TestWaitForRestoreCompleteFailsOnErrorAtFullProgress(c *C) {
+	fmt.Println("Testing restore completion reports a failure recorded at full progress")
+
+	e := NewEngine("engine-a", "vol-a", lhtypes.FrontendEmpty, 10, make(chan interface{}, 1), defaultTestSnapshotMaxCount, nil)
+	e.restore = NewEngineRestore(nil, "s3://backupbucket@us-east-1/backupstore?backup=backup-2", "backup-2", e, nil)
+	e.restore.Progress = 100
+	e.restore.State = btypes.ProgressStateError
+	e.restore.Error = "failed to sync NVMe device /dev/longhorn/vol-a: input/output error"
+
+	err := e.waitForRestoreComplete()
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "input/output error"), Equals, true)
+}
+
+func (s *TestSuite) TestWaitForRestoreCompleteSucceedsAtFullProgress(c *C) {
+	fmt.Println("Testing restore completion still succeeds at full progress")
+
+	e := NewEngine("engine-a", "vol-a", lhtypes.FrontendEmpty, 10, make(chan interface{}, 1), defaultTestSnapshotMaxCount, nil)
+	e.restore = NewEngineRestore(nil, "s3://backupbucket@us-east-1/backupstore?backup=backup-2", "backup-2", e, nil)
+	e.restore.Progress = 100
+
+	c.Assert(e.waitForRestoreComplete(), IsNil)
 }

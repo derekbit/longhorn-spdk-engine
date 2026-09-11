@@ -108,12 +108,21 @@ func (r *EngineRestore) OpenVolumeDev(_ string) (*os.File, string, error) {
 }
 
 func (r *EngineRestore) CloseVolumeDev(volDev *os.File) error {
+	var syncErr error
 	if err := volDev.Sync(); err != nil {
 		r.log.WithError(err).Errorf("Failed to sync NVMe device %v before close", volDev.Name())
+		syncErr = errors.Wrapf(err, "failed to sync NVMe device %v before close", volDev.Name())
+		r.RLock()
+		progress := r.Progress
+		r.RUnlock()
+		r.UpdateRestoreStatus(volDev.Name(), progress, syncErr)
 	}
 
 	r.log.Infof("Closing NVMe device %v", volDev.Name())
 	closeErr := volDev.Close()
+	if syncErr != nil {
+		return syncErr
+	}
 
 	return closeErr
 }
